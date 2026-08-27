@@ -1,0 +1,54 @@
+{{define "content"}}
+<div class="page-head">
+  <h1>{{.Device.EffectiveHostname}}</h1>
+  <a href="/">&larr; Back to devices</a>
+</div>
+
+<table class="detail">
+<tbody>
+<tr><th>MAC</th><td class="mono">{{.Device.MAC}}</td></tr>
+<tr><th>UniFi name</th><td>{{.Device.UniFiName}}</td></tr>
+<tr><th>Network</th><td>{{.Device.UniFiNetworkName}}</td></tr>
+<tr><th>Zone</th><td class="mono">{{.Device.Zone}}</td></tr>
+<tr><th>IP address</th><td class="mono">{{.Device.IPAddress}}</td></tr>
+<tr><th>Lease</th><td>
+  {{if .Device.IsFixedIP}}<span class="badge badge-muted">static / fixed IP</span>
+  {{else if .Device.LeaseEstimatedExpiry}}<span class="badge badge-muted" title="estimated from last seen + the network's configured DHCP lease time">DHCP · estimated expiry {{datetimePtr .Device.LeaseEstimatedExpiry}}</span>
+  {{else}}<span class="badge badge-muted">DHCP (lease time unknown)</span>{{end}}
+</td></tr>
+<tr><th>First seen</th><td>{{datetime .Device.FirstSeen}}</td></tr>
+<tr><th>Last seen</th><td>{{datetime .Device.LastSeen}}</td></tr>
+<tr><th>Status</th><td>
+  {{if .Device.Excluded}}<span class="badge badge-muted">excluded</span>
+  {{else if .Device.DNSRecordSynced}}<span class="badge badge-ok">synced</span>
+  {{else}}<span class="badge badge-error" title="{{.Device.LastSyncError}}">error</span>{{end}}
+</td></tr>
+</tbody>
+</table>
+
+<h1>History</h1>
+<table class="events">
+<thead>
+<tr>
+  <th>Time</th>
+  <th>Actor</th>
+  <th>Action</th>
+  <th>Result</th>
+  <th>Detail</th>
+</tr>
+</thead>
+<tbody>
+{{range .Events}}
+<tr class="{{if not .Success}}error{{end}}">
+  <td>{{datetime .CreatedAt}}</td>
+  <td>{{.Actor}}</td>
+  <td>{{.Action}}</td>
+  <td>{{if .Success}}<span class="badge badge-ok">ok</span>{{else}}<span class="badge badge-error">error</span>{{end}}</td>
+  <td>{{.Detail}}</td>
+</tr>
+{{else}}
+<tr><td colspan="5" class="empty">No history for this device yet.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}

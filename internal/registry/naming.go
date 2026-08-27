@@ -81,15 +81,22 @@ func fallbackName(mac, pattern string) string {
 	return "device-" + suffix
 }
 
-// Disambiguate returns name unchanged if it's unclaimed or already owned by
-// mac in taken; otherwise it appends a MAC-derived suffix to make it
-// unique.
-func Disambiguate(name, mac string, taken map[string]string) string {
-	if owner, ok := taken[name]; !ok || owner == mac {
+// TakenKey builds the key used in a Disambiguate "taken" map: hostnames
+// only need to be unique within the same DNS zone, so the same label can
+// legitimately be reused across zones.
+func TakenKey(zone, hostname string) string {
+	return zone + "\x00" + hostname
+}
+
+// Disambiguate returns name unchanged if it's unclaimed within zone or
+// already owned by mac in taken; otherwise it appends a MAC-derived suffix
+// to make it unique. taken is keyed by TakenKey(zone, hostname).
+func Disambiguate(name, mac, zone string, taken map[string]string) string {
+	if owner, ok := taken[TakenKey(zone, name)]; !ok || owner == mac {
 		return name
 	}
 	suffixed := name + "-" + macaddr.Suffix(mac, 4)
-	if owner, ok := taken[suffixed]; !ok || owner == mac {
+	if owner, ok := taken[TakenKey(zone, suffixed)]; !ok || owner == mac {
 		return suffixed
 	}
 	return name + "-" + macaddr.Suffix(mac, 12)

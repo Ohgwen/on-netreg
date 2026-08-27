@@ -1,6 +1,6 @@
-// Command netreg runs the ON-Netreg server: the background UniFi->Technitium
-// sync engine and the web dashboard (OIDC-authenticated by default; see
-// server.auth_enabled / -disable-auth).
+// Command netreg runs the ON-Netreg server: the background multi-controller
+// UniFi->Technitium sync engine and the web dashboard (OIDC-authenticated by
+// default; see server.auth_enabled / -disable-auth).
 package main
 
 import (
@@ -20,6 +20,7 @@ import (
 	"github.com/Ohgwen/on-netreg/internal/config"
 	"github.com/Ohgwen/on-netreg/internal/db"
 	"github.com/Ohgwen/on-netreg/internal/logging"
+	"github.com/Ohgwen/on-netreg/internal/settings"
 	"github.com/Ohgwen/on-netreg/internal/sync"
 	"github.com/Ohgwen/on-netreg/internal/technitium"
 	"github.com/Ohgwen/on-netreg/internal/unifi"
@@ -41,7 +42,7 @@ func main() {
 func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 	if disableAuth {
 		// Applied before Load so it also short-circuits Validate()'s
-		// requirement for oidc.issuer_url/client_id/session_secret.
+		// requirement for oidc.issuer_url/client_id.
 		os.Setenv("NETREG_SERVER_AUTH_ENABLED", "false")
 	}
 
@@ -51,7 +52,7 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 	}
 
 	if !cfg.Server.AuthEnabled {
-		logger.Warn("authentication is DISABLED (server.auth_enabled=false) -- the dashboard is unauthenticated; do not expose this instance to an untrusted network")
+		logger.Warn("authentication is DISABLED (server.auth_enabled=false) -- the dashboard is unauthenticated and every visitor has Settings access; do not expose this instance to an untrusted network")
 	}
 
 	gdb, err := db.Open(cfg.Database)
@@ -59,18 +60,22 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 		return err
 	}
 
-	unifiClient, err := unifi.New(cfg.Unifi)
-	if err != nil {
+	secretKey := settings.Key(cfg.Server.SessionSecret)
+	if err := settings.SeedFromConfig(gdb, secretKey, cfg); err != nil {
 		return err
 	}
-	dnsClient := technitium.New(cfg.Technitium)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	var authenticator *auth.Authenticator
 	currentUser := func(*http.Request) string { return "" }
+	// With auth disabled there's no login/no role system at all, so every
+	// visitor is treated as admin -- matches this app's existing "any
+	// logged-in user gets full access" behavior for the local-dev case.
+	currentUserIsAdmin := func(*http.Request) bool { return true }
 	authMiddleware := func(next http.Handler) http.Handler { return next }
+	adminMiddleware := func(next http.Handler) http.Handler { return next }
 
 	if cfg.Server.AuthEnabled {
 		authenticator, err = auth.New(ctx, cfg.OIDC, cfg.Server.SessionSecret)
@@ -78,15 +83,21 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 			return err
 		}
 		currentUser = authenticator.CurrentUser
+		currentUserIsAdmin = authenticator.CurrentUserIsAdmin
 		authMiddleware = authenticator.Middleware
+		adminMiddleware = authenticator.RequireAdmin
 	}
 
 	engine := &sync.Engine{
-		DB:     gdb,
-		Unifi:  unifiClient,
-		DNS:    dnsClient,
-		Config: cfg,
-		Logger: logger,
+		DB:        gdb,
+		Logger:    logger,
+		SecretKey: secretKey,
+		NewUnifiClient: func(c config.UnifiConfig) (sync.UnifiClient, error) {
+			return unifi.New(c)
+		},
+		NewDNSClient: func(c config.TechnitiumConfig) sync.DNSClient {
+			return technitium.New(c)
+		},
 	}
 	go engine.Run(ctx)
 
@@ -99,14 +110,31 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 		return err
 	}
 
+	dnsClientFactory := func(ctx context.Context) (handlers.DNSClient, error) {
+		technitiumCfg, err := settings.LoadTechnitium(gdb, secretKey)
+		if err != nil {
+			return nil, err
+		}
+		return technitium.New(technitiumCfg), nil
+	}
+
 	h := &handlers.Handlers{
 		DB:          gdb,
 		Engine:      engine,
-		DNS:         dnsClient,
-		Zone:        cfg.Technitium.Zone,
+		DNS:         dnsClientFactory,
 		Pages:       pages,
 		Logger:      logger,
 		CurrentUser: currentUser,
+		IsAdmin:     currentUserIsAdmin,
+	}
+
+	settingsHandlers := &handlers.SettingsHandlers{
+		DB:          gdb,
+		SecretKey:   secretKey,
+		Pages:       pages,
+		Logger:      logger,
+		CurrentUser: currentUser,
+		IsAdmin:     currentUserIsAdmin,
 	}
 
 	mux := http.NewServeMux()
@@ -116,6 +144,7 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 		mux.HandleFunc("GET /logout", authenticator.LogoutHandler)
 	}
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(staticFS)))
+	mux.Handle("/settings/", authMiddleware(adminMiddleware(settingsHandlers.Routes())))
 	mux.Handle("/", authMiddleware(h.Routes()))
 
 	srv := &http.Server{

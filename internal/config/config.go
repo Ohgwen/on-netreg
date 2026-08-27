@@ -13,12 +13,18 @@ import (
 )
 
 type Config struct {
-	Database    DatabaseConfig    `yaml:"database"`
-	Unifi       UnifiConfig       `yaml:"unifi"`
-	Technitium  TechnitiumConfig  `yaml:"technitium"`
-	DNS         DNSConfig         `yaml:"dns"`
-	OIDC        OIDCConfig        `yaml:"oidc"`
-	Server      ServerConfig      `yaml:"server"`
+	Database DatabaseConfig `yaml:"database"`
+	// Unifi and Technitium are one-time seed values only: on first startup,
+	// if their respective DB tables are empty, these populate the DB-backed
+	// settings (see internal/settings). After that the DB is authoritative
+	// and editing these sections has no further effect -- manage
+	// controllers/DNS connection settings from the webapp instead.
+	Unifi      UnifiConfig      `yaml:"unifi"`
+	Technitium TechnitiumConfig `yaml:"technitium"`
+	// DNS is likewise a one-time seed for the DB-backed AppSettings row.
+	DNS    DNSConfig    `yaml:"dns"`
+	OIDC   OIDCConfig   `yaml:"oidc"`
+	Server ServerConfig `yaml:"server"`
 }
 
 type DatabaseConfig struct {
@@ -38,9 +44,11 @@ type UnifiConfig struct {
 }
 
 type TechnitiumConfig struct {
-	BaseURL   string `yaml:"base_url"`
-	Username  string `yaml:"username"`
-	Password  string `yaml:"password"`
+	BaseURL  string `yaml:"base_url"`
+	Username string `yaml:"username"`
+	Password string `yaml:"password"`
+	// Zone is a one-time seed for AppSettings.DefaultZone (see
+	// internal/settings) -- it is not read again after the DB row exists.
 	Zone      string `yaml:"zone"`
 	TTL       int    `yaml:"ttl"`
 	CreatePTR bool   `yaml:"create_ptr"`
@@ -61,6 +69,13 @@ type OIDCConfig struct {
 	ClientSecret string   `yaml:"client_secret"`
 	RedirectURL  string   `yaml:"redirect_url"`
 	Scopes       []string `yaml:"scopes"`
+	// GroupsClaim is the ID token claim holding the user's group
+	// memberships, used to decide access to the admin-only Settings area.
+	GroupsClaim string `yaml:"groups_claim"`
+	// AdminGroup is the group name that grants Settings access. When empty,
+	// every authenticated user is treated as admin (matches this app's
+	// current behavior for anyone who doesn't configure it).
+	AdminGroup string `yaml:"admin_group"`
 }
 
 type ServerConfig struct {
@@ -68,7 +83,10 @@ type ServerConfig struct {
 	// AuthEnabled gates OIDC login. When false, the dashboard is served with
 	// no authentication at all -- only for local development/testing on a
 	// trusted network, never for anything internet-reachable.
-	AuthEnabled   bool   `yaml:"auth_enabled"`
+	AuthEnabled bool `yaml:"auth_enabled"`
+	// SessionSecret signs OIDC session cookies and, via internal/settings,
+	// derives the key used to encrypt UniFi/Technitium passwords stored in
+	// the database. Required even when auth is disabled.
 	SessionSecret string `yaml:"session_secret"`
 }
 
@@ -89,7 +107,8 @@ func Defaults() Config {
 			FallbackPattern: "{vendor}-{macsuffix}",
 		},
 		OIDC: OIDCConfig{
-			Scopes: []string{"openid", "profile", "email"},
+			Scopes:      []string{"openid", "profile", "email"},
+			GroupsClaim: "groups",
 		},
 		Server: ServerConfig{
 			ListenAddr:  ":8080",
@@ -134,17 +153,8 @@ func (c Config) Validate() error {
 	if c.Database.DSN == "" {
 		problems = append(problems, "database.dsn is required")
 	}
-	if c.Unifi.BaseURL == "" {
-		problems = append(problems, "unifi.base_url is required")
-	}
-	if c.Unifi.PollInterval <= 0 {
-		problems = append(problems, "unifi.poll_interval must be positive")
-	}
-	if c.Technitium.BaseURL == "" {
-		problems = append(problems, "technitium.base_url is required")
-	}
-	if c.Technitium.Zone == "" {
-		problems = append(problems, "technitium.zone is required")
+	if c.Server.SessionSecret == "" {
+		problems = append(problems, "server.session_secret is required (used for OIDC sessions and to encrypt stored connection settings)")
 	}
 	if c.Server.AuthEnabled {
 		if c.OIDC.IssuerURL == "" {
@@ -152,9 +162,6 @@ func (c Config) Validate() error {
 		}
 		if c.OIDC.ClientID == "" {
 			problems = append(problems, "oidc.client_id is required (or set server.auth_enabled: false)")
-		}
-		if c.Server.SessionSecret == "" {
-			problems = append(problems, "server.session_secret is required (or set server.auth_enabled: false)")
 		}
 	}
 
@@ -221,6 +228,8 @@ func applyEnvOverrides(cfg *Config) {
 	if v, ok := os.LookupEnv("NETREG_OIDC_SCOPES"); ok {
 		cfg.OIDC.Scopes = strings.Split(v, ",")
 	}
+	str("NETREG_OIDC_GROUPS_CLAIM", &cfg.OIDC.GroupsClaim)
+	str("NETREG_OIDC_ADMIN_GROUP", &cfg.OIDC.AdminGroup)
 
 	str("NETREG_SERVER_LISTEN_ADDR", &cfg.Server.ListenAddr)
 	boolean("NETREG_SERVER_AUTH_ENABLED", &cfg.Server.AuthEnabled)

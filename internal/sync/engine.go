@@ -1,10 +1,12 @@
-// Package sync runs the periodic reconciliation loop: fetch UniFi clients,
-// diff against the registry, and apply the resulting DNS changes to
-// Technitium.
+// Package sync runs the periodic reconciliation loop: for every configured
+// UniFi controller, fetch its clients, diff against the registry, and
+// apply the resulting DNS changes to Technitium.
 package sync
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/Ohgwen/on-netreg/internal/config"
 	"github.com/Ohgwen/on-netreg/internal/db"
 	"github.com/Ohgwen/on-netreg/internal/registry"
+	"github.com/Ohgwen/on-netreg/internal/settings"
 	"github.com/Ohgwen/on-netreg/internal/technitium"
 	"github.com/Ohgwen/on-netreg/internal/unifi"
 )
@@ -31,19 +34,31 @@ type DNSClient interface {
 }
 
 type Engine struct {
-	DB     *gorm.DB
-	Unifi  UnifiClient
-	DNS    DNSClient
-	Config config.Config
-	Logger *slog.Logger
+	DB        *gorm.DB
+	Logger    *slog.Logger
+	SecretKey []byte
+
+	// NewUnifiClient/NewDNSClient build clients from settings loaded fresh
+	// from the DB each cycle (so edits made in the webapp's Settings pages
+	// take effect on the next tick, no restart required). Defaults to
+	// unifi.New / technitium.New; overridable in tests.
+	NewUnifiClient func(config.UnifiConfig) (UnifiClient, error)
+	NewDNSClient   func(config.TechnitiumConfig) DNSClient
 }
 
 // Run blocks, running one reconciliation cycle immediately and then on
-// every tick of Config.Unifi.PollInterval, until ctx is canceled.
+// every tick of the configured poll interval, until ctx is canceled. The
+// interval is read once at startup; changing it in Settings takes effect
+// on the next process restart.
 func (e *Engine) Run(ctx context.Context) {
 	e.runOnceLogged(ctx)
 
-	ticker := time.NewTicker(e.Config.Unifi.PollInterval)
+	interval := config.Defaults().Unifi.PollInterval
+	if appSettings, err := settings.LoadApp(e.DB); err == nil && appSettings.PollInterval > 0 {
+		interval = appSettings.PollInterval
+	}
+
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -62,22 +77,96 @@ func (e *Engine) runOnceLogged(ctx context.Context) {
 	}
 }
 
-// RunOnce performs a single fetch-reconcile-apply cycle.
+// RunOnce performs one fetch-reconcile-apply cycle for every enabled UniFi
+// controller. One controller failing (e.g. unreachable) does not prevent
+// the others from syncing; their errors are joined and returned together.
 func (e *Engine) RunOnce(ctx context.Context) error {
-	var existing []db.Device
-	if err := e.DB.Find(&existing).Error; err != nil {
-		return err
+	appSettings, err := settings.LoadApp(e.DB)
+	if err != nil {
+		return fmt.Errorf("loading app settings: %w", err)
 	}
 
-	seen, err := e.Unifi.FetchClients(ctx)
+	dnsCfg, err := settings.LoadTechnitium(e.DB, e.SecretKey)
 	if err != nil {
-		return err
+		return fmt.Errorf("loading technitium settings: %w", err)
+	}
+	dns := e.NewDNSClient(dnsCfg)
+
+	controllers, err := settings.LoadControllers(e.DB, e.SecretKey)
+	if err != nil {
+		return fmt.Errorf("loading unifi controllers: %w", err)
+	}
+	if len(controllers) == 0 {
+		e.Logger.Warn("no enabled unifi controllers configured; nothing to sync")
+		return nil
+	}
+
+	networks, err := settings.LoadNetworks(e.DB)
+	if err != nil {
+		return fmt.Errorf("loading unifi networks: %w", err)
+	}
+	networksByController := make(map[uint][]db.UnifiNetwork, len(controllers))
+	for _, n := range networks {
+		networksByController[n.ControllerID] = append(networksByController[n.ControllerID], n)
+	}
+
+	var errs []error
+	for _, ctrl := range controllers {
+		if err := e.syncController(ctx, ctrl, networksByController[ctrl.ID], dns, dnsCfg, appSettings); err != nil {
+			e.Logger.Error("sync failed for controller", "controller", ctrl.Name, "error", err)
+			errs = append(errs, fmt.Errorf("controller %q: %w", ctrl.Name, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRuntime, networks []db.UnifiNetwork, dns DNSClient, dnsCfg config.TechnitiumConfig, appSettings db.AppSettings) error {
+	unifiClient, err := e.NewUnifiClient(ctrl.Config)
+	if err != nil {
+		return fmt.Errorf("creating unifi client: %w", err)
+	}
+
+	var existing []db.Device
+	if err := e.DB.Where("controller_id = ?", ctrl.ID).Find(&existing).Error; err != nil {
+		return fmt.Errorf("loading existing devices: %w", err)
+	}
+
+	seen, err := unifiClient.FetchClients(ctx)
+	if err != nil {
+		return fmt.Errorf("fetching clients: %w", err)
+	}
+
+	defaultZone := ctrl.DefaultZone
+	if defaultZone == "" {
+		defaultZone = appSettings.DefaultZone
+	}
+
+	networkByUnifiID := make(map[string]db.UnifiNetwork, len(networks))
+	for _, n := range networks {
+		networkByUnifiID[n.UnifiNetworkID] = n
+	}
+	resolver := func(c unifi.NetworkClient) registry.NetworkInfo {
+		n, ok := networkByUnifiID[c.NetworkID]
+		if !ok || c.NetworkID == "" {
+			return registry.NetworkInfo{Zone: defaultZone}
+		}
+		zone := n.Zone
+		if zone == "" {
+			zone = defaultZone
+		}
+		id := n.ID
+		return registry.NetworkInfo{NetworkID: &id, Zone: zone, LeaseSeconds: n.DHCPLeaseTimeSeconds}
+	}
+
+	dnsConfig := config.DNSConfig{
+		FallbackPattern:        appSettings.FallbackPattern,
+		RemoveAfterAbsenceDays: appSettings.RemoveAfterAbsenceDays,
 	}
 
 	now := time.Now()
-	result := registry.Reconcile(now, existing, seen, e.Config.DNS)
+	result := registry.Reconcile(now, ctrl.ID, existing, seen, dnsConfig, resolver)
 
-	outcomes := e.applyChanges(ctx, result.Changes)
+	outcomes := e.applyChanges(ctx, dns, dnsCfg, result.Changes)
 
 	for i := range result.Devices {
 		dev := &result.Devices[i]
@@ -95,39 +184,38 @@ type applyOutcome struct {
 	errMsg string
 }
 
-func (e *Engine) applyChanges(ctx context.Context, changes []registry.Change) map[string]applyOutcome {
+func (e *Engine) applyChanges(ctx context.Context, dns DNSClient, dnsCfg config.TechnitiumConfig, changes []registry.Change) map[string]applyOutcome {
 	outcomes := make(map[string]applyOutcome, len(changes))
-	zone := e.Config.Technitium.Zone
 
 	for _, change := range changes {
 		var applyErr error
 
 		switch change.Kind {
 		case registry.ChangeCreate:
-			applyErr = e.DNS.AddRecord(ctx, technitium.AddRecordRequest{
-				Domain:        fqdn(change.Hostname, zone),
-				Zone:          zone,
+			applyErr = dns.AddRecord(ctx, technitium.AddRecordRequest{
+				Domain:        fqdn(change.Hostname, change.Zone),
+				Zone:          change.Zone,
 				Type:          "A",
-				TTL:           e.Config.Technitium.TTL,
+				TTL:           dnsCfg.TTL,
 				IPAddress:     change.IPAddress,
 				Overwrite:     true,
-				PTR:           e.Config.Technitium.CreatePTR,
-				CreatePTRZone: e.Config.Technitium.CreatePTR,
+				PTR:           dnsCfg.CreatePTR,
+				CreatePTRZone: dnsCfg.CreatePTR,
 			})
 		case registry.ChangeUpdate:
-			applyErr = e.DNS.UpdateRecord(ctx, technitium.UpdateRecordRequest{
-				Domain:       fqdn(change.PreviousHostname, zone),
-				Zone:         zone,
+			applyErr = dns.UpdateRecord(ctx, technitium.UpdateRecordRequest{
+				Domain:       fqdn(change.PreviousHostname, change.PreviousZone),
+				Zone:         change.PreviousZone,
 				Type:         "A",
 				IPAddress:    change.PreviousIPAddress,
-				NewDomain:    fqdn(change.Hostname, zone),
+				NewDomain:    fqdn(change.Hostname, change.Zone),
 				NewIPAddress: change.IPAddress,
-				NewTTL:       e.Config.Technitium.TTL,
+				NewTTL:       dnsCfg.TTL,
 			})
 		case registry.ChangeDelete:
-			applyErr = e.DNS.DeleteRecord(ctx, technitium.DeleteRecordRequest{
-				Domain:    fqdn(change.PreviousHostname, zone),
-				Zone:      zone,
+			applyErr = dns.DeleteRecord(ctx, technitium.DeleteRecordRequest{
+				Domain:    fqdn(change.PreviousHostname, change.PreviousZone),
+				Zone:      change.PreviousZone,
 				Type:      "A",
 				IPAddress: change.PreviousIPAddress,
 			})
@@ -142,7 +230,7 @@ func (e *Engine) applyChanges(ctx context.Context, changes []registry.Change) ma
 			}
 			e.Logger.Error("failed to apply DNS change", "mac", change.MAC, "kind", change.Kind, "error", applyErr)
 		} else {
-			e.Logger.Info("applied DNS change", "mac", change.MAC, "kind", change.Kind, "hostname", change.Hostname)
+			e.Logger.Info("applied DNS change", "mac", change.MAC, "kind", change.Kind, "hostname", change.Hostname, "zone", change.Zone)
 		}
 		outcomes[change.MAC] = outcome
 
@@ -150,6 +238,7 @@ func (e *Engine) applyChanges(ctx context.Context, changes []registry.Change) ma
 			MAC:       change.MAC,
 			Action:    db.SyncEventAction(change.Kind),
 			Success:   applyErr == nil,
+			Actor:     db.SystemActor,
 			CreatedAt: time.Now(),
 		}
 		if applyErr != nil {

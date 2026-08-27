@@ -22,10 +22,19 @@ var funcMap = template.FuncMap{
 		}
 		return t.Local().Format("2006-01-02 15:04:05")
 	},
+	"datetimePtr": func(t *time.Time) string {
+		if t == nil || t.IsZero() {
+			return ""
+		}
+		return t.Local().Format("2006-01-02 15:04:05")
+	},
 }
 
 // pages lists the content templates that get combined with layout.html.
-var pages = []string{"dashboard", "events"}
+var pages = []string{
+	"dashboard", "events", "device",
+	"settings_general", "settings_controllers", "settings_technitium", "settings_zones",
+}
 
 // Templates parses each page template together with the shared layout,
 // keyed by page name (e.g. "dashboard"). Each is executed via

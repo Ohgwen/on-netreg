@@ -1,6 +1,7 @@
 // Package handlers implements the authenticated dashboard: viewing devices,
 // editing hostname overrides, excluding devices from DNS sync, forgetting
-// devices, triggering a manual sync, and viewing the sync event log.
+// devices, triggering a manual sync, viewing the sync/audit log, and (in
+// settings.go) the admin-only connection Settings pages.
 package handlers
 
 import (
@@ -30,22 +31,44 @@ type DNSClient interface {
 	DeleteRecord(ctx context.Context, r technitium.DeleteRecordRequest) error
 }
 
+// DNSClientFactory builds a DNSClient from the Technitium connection
+// currently stored in the DB, so it always reflects the latest Settings
+// edits rather than what was configured at process start.
+type DNSClientFactory func(ctx context.Context) (DNSClient, error)
+
 type Handlers struct {
 	DB          *gorm.DB
 	Engine      Engine
-	DNS         DNSClient
-	Zone        string
+	DNS         DNSClientFactory
 	Pages       map[string]*template.Template
 	Logger      *slog.Logger
 	CurrentUser func(*http.Request) string
+	IsAdmin     func(*http.Request) bool
 }
 
 type pageData struct {
 	Title   string
 	User    string
+	IsAdmin bool
+	Flash   string
+
 	Devices []db.Device
 	Events  []db.SyncEvent
-	Flash   string
+
+	// device.html
+	Device db.Device
+
+	// events.html filters
+	Actors      []string
+	FilterMAC   string
+	FilterActor string
+
+	// settings_*.html
+	AppSettings     db.AppSettings
+	ControllerViews []controllerView
+	ZoneNames       []string
+	TechSettings    db.TechnitiumSettings
+	Zones           []technitium.ZoneInfo
 }
 
 // Routes returns the authenticated dashboard's routes. Callers are
@@ -55,6 +78,7 @@ func (h *Handlers) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", h.dashboard)
 	mux.HandleFunc("GET /events", h.events)
 	mux.HandleFunc("POST /sync", h.triggerSync)
+	mux.HandleFunc("GET /devices/{id}", h.deviceDetail)
 	mux.HandleFunc("POST /devices/{id}/override", h.setOverride)
 	mux.HandleFunc("POST /devices/{id}/exclude", h.toggleExclude)
 	mux.HandleFunc("POST /devices/{id}/forget", h.forgetDevice)
@@ -63,6 +87,7 @@ func (h *Handlers) Routes() http.Handler {
 
 func (h *Handlers) render(w http.ResponseWriter, r *http.Request, page string, data pageData) {
 	data.User = h.CurrentUser(r)
+	data.IsAdmin = h.IsAdmin(r)
 	tmpl, ok := h.Pages[page]
 	if !ok {
 		http.Error(w, "template not found: "+page, http.StatusInternalServerError)
@@ -71,6 +96,29 @@ func (h *Handlers) render(w http.ResponseWriter, r *http.Request, page string, d
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := tmpl.ExecuteTemplate(w, "layout", data); err != nil {
 		h.Logger.Error("rendering template", "page", page, "error", err)
+	}
+}
+
+// logAudit records an admin-driven action taken from the dashboard, so it
+// shows up in the same unified audit log the sync engine writes to.
+func (h *Handlers) logAudit(r *http.Request, mac string, action db.SyncEventAction, detail string, success bool) {
+	writeAuditEvent(h.DB, h.Logger, mac, h.CurrentUser(r), action, detail, success)
+}
+
+func writeAuditEvent(gdb *gorm.DB, logger *slog.Logger, mac, actor string, action db.SyncEventAction, detail string, success bool) {
+	if actor == "" {
+		actor = db.SystemActor
+	}
+	event := db.SyncEvent{
+		MAC:       mac,
+		Action:    action,
+		Detail:    detail,
+		Success:   success,
+		Actor:     actor,
+		CreatedAt: time.Now(),
+	}
+	if err := gdb.Create(&event).Error; err != nil {
+		logger.Error("failed to record audit event", "error", err)
 	}
 }
 
@@ -87,13 +135,54 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handlers) events(w http.ResponseWriter, r *http.Request) {
+func (h *Handlers) deviceDetail(w http.ResponseWriter, r *http.Request) {
+	dev, ok := h.deviceByID(w, r)
+	if !ok {
+		return
+	}
 	var events []db.SyncEvent
-	if err := h.DB.Order("created_at desc").Limit(200).Find(&events).Error; err != nil {
+	if err := h.DB.Where("mac = ?", dev.MAC).Order("created_at desc").Limit(200).Find(&events).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	h.render(w, r, "events", pageData{Title: "Sync Log", Events: events})
+	h.render(w, r, "device", pageData{
+		Title:  dev.EffectiveHostname(),
+		Device: dev,
+		Events: events,
+	})
+}
+
+func (h *Handlers) events(w http.ResponseWriter, r *http.Request) {
+	macFilter := r.URL.Query().Get("mac")
+	actorFilter := r.URL.Query().Get("actor")
+
+	q := h.DB.Order("created_at desc").Limit(200)
+	if macFilter != "" {
+		q = q.Where("mac = ?", macFilter)
+	}
+	if actorFilter != "" {
+		q = q.Where("actor = ?", actorFilter)
+	}
+
+	var events []db.SyncEvent
+	if err := q.Find(&events).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var actors []string
+	if err := h.DB.Model(&db.SyncEvent{}).Distinct().Order("actor").Pluck("actor", &actors).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	h.render(w, r, "events", pageData{
+		Title:       "Sync Log",
+		Events:      events,
+		Actors:      actors,
+		FilterMAC:   macFilter,
+		FilterActor: actorFilter,
+	})
 }
 
 func (h *Handlers) triggerSync(w http.ResponseWriter, r *http.Request) {
@@ -101,10 +190,13 @@ func (h *Handlers) triggerSync(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	flash := "Sync completed."
+	success := true
 	if err := h.Engine.RunOnce(ctx); err != nil {
 		h.Logger.Error("manual sync failed", "error", err)
 		flash = "Sync failed: " + err.Error()
+		success = false
 	}
+	h.logAudit(r, "", db.SyncEventManualSync, flash, success)
 	http.Redirect(w, r, "/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
 }
 
@@ -133,10 +225,12 @@ func (h *Handlers) setOverride(w http.ResponseWriter, r *http.Request) {
 	}
 
 	hostname := r.FormValue("hostname")
+	detail := "cleared hostname override"
 	if hostname == "" {
 		dev.OverrideHostname = nil
 	} else {
 		dev.OverrideHostname = &hostname
+		detail = "set hostname override to " + hostname
 	}
 	// Force the next sync cycle to (re)apply this device's DNS record under
 	// the new hostname.
@@ -146,6 +240,7 @@ func (h *Handlers) setOverride(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	h.logAudit(r, dev.MAC, db.SyncEventOverride, detail, true)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -159,6 +254,11 @@ func (h *Handlers) toggleExclude(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	action, detail := db.SyncEventExclude, "excluded from DNS sync"
+	if !dev.Excluded {
+		action, detail = db.SyncEventInclude, "re-included in DNS sync"
+	}
+	h.logAudit(r, dev.MAC, action, detail, true)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }
 
@@ -171,17 +271,22 @@ func (h *Handlers) forgetDevice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if dev.DNSRecordSynced && !dev.Excluded {
+	if dev.DNSRecordSynced && !dev.Excluded && dev.Zone != "" {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
-		domain := dev.EffectiveHostname() + "." + h.Zone
-		if err := h.DNS.DeleteRecord(ctx, technitium.DeleteRecordRequest{
-			Domain:    domain,
-			Zone:      h.Zone,
-			Type:      "A",
-			IPAddress: dev.IPAddress,
-		}); err != nil {
-			h.Logger.Error("failed to delete DNS record for forgotten device", "mac", dev.MAC, "domain", domain, "error", err)
+		dns, err := h.DNS(ctx)
+		if err != nil {
+			h.Logger.Error("failed to build technitium client to forget device", "mac", dev.MAC, "error", err)
+		} else {
+			domain := dev.EffectiveHostname() + "." + dev.Zone
+			if err := dns.DeleteRecord(ctx, technitium.DeleteRecordRequest{
+				Domain:    domain,
+				Zone:      dev.Zone,
+				Type:      "A",
+				IPAddress: dev.IPAddress,
+			}); err != nil {
+				h.Logger.Error("failed to delete DNS record for forgotten device", "mac", dev.MAC, "domain", domain, "error", err)
+			}
 		}
 	}
 
@@ -189,5 +294,6 @@ func (h *Handlers) forgetDevice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	h.logAudit(r, dev.MAC, db.SyncEventForget, "forgot device "+dev.EffectiveHostname(), true)
 	http.Redirect(w, r, "/", http.StatusSeeOther)
 }

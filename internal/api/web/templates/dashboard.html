@@ -10,7 +10,9 @@
 <thead>
 <tr>
   <th>Hostname</th>
-  <th>UniFi name</th>
+  <th>Network</th>
+  <th>Zone</th>
+  <th>Lease</th>
   <th>MAC</th>
   <th>IP</th>
   <th>Last seen</th>
@@ -23,8 +25,14 @@
 <tbody>
 {{range .Devices}}
 <tr class="{{if .Excluded}}excluded{{end}}{{if not .DNSRecordSynced}} unsynced{{end}}">
-  <td>{{.EffectiveHostname}}</td>
-  <td>{{.UniFiName}}</td>
+  <td><a href="/devices/{{.ID}}">{{.EffectiveHostname}}</a></td>
+  <td>{{.UniFiNetworkName}}</td>
+  <td class="mono">{{.Zone}}</td>
+  <td>
+    {{if .IsFixedIP}}<span class="badge badge-muted">static</span>
+    {{else if .LeaseEstimatedExpiry}}<span class="badge badge-muted" title="estimated from last seen + the network's configured DHCP lease time">DHCP · est. {{datetimePtr .LeaseEstimatedExpiry}}</span>
+    {{else}}<span class="badge badge-muted">DHCP</span>{{end}}
+  </td>
   <td class="mono">{{.MAC}}</td>
   <td class="mono">{{.IPAddress}}</td>
   <td>{{datetime .LastSeen}}</td>
@@ -51,7 +59,7 @@
   </td>
 </tr>
 {{else}}
-<tr><td colspan="9" class="empty">No devices yet. Try "Sync now" or wait for the next poll.</td></tr>
+<tr><td colspan="11" class="empty">No devices yet. Try "Sync now" or wait for the next poll.</td></tr>
 {{end}}
 </tbody>
 </table>

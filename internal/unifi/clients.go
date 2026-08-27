@@ -62,12 +62,16 @@ func toNetworkClient(c apiClient, online bool) NetworkClient {
 		ip = c.FixedIP
 	}
 	return NetworkClient{
-		MAC:      macaddr.Normalize(c.MAC),
-		Name:     c.Name,
-		Hostname: c.Hostname,
-		IP:       ip,
-		IsWired:  c.IsWired,
-		IsGuest:  c.IsGuest,
-		Online:   online,
+		MAC:       macaddr.Normalize(c.MAC),
+		Name:      c.Name,
+		Hostname:  c.Hostname,
+		IP:        ip,
+		IsWired:   c.IsWired,
+		IsGuest:   c.IsGuest,
+		IsFixedIP: c.UseFixedIP && c.FixedIP != "",
+		NetworkID: c.NetworkID,
+		Network:   c.Network,
+		VLAN:      c.VLAN,
+		Online:    online,
 	}
 }

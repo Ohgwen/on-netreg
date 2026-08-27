@@ -1,10 +1,23 @@
 {{define "content"}}
 <h1>Sync log</h1>
+<form method="get" action="/events" class="inline filter-form">
+  <input type="text" name="mac" placeholder="Filter by MAC" value="{{.FilterMAC}}">
+  <select name="actor">
+    <option value="">All users</option>
+    {{$selected := .FilterActor}}
+    {{range .Actors}}
+    <option value="{{.}}" {{if eq . $selected}}selected{{end}}>{{.}}</option>
+    {{end}}
+  </select>
+  <button type="submit">Filter</button>
+  {{if or .FilterMAC .FilterActor}}<a href="/events">Clear</a>{{end}}
+</form>
 <table class="events">
 <thead>
 <tr>
   <th>Time</th>
   <th>MAC</th>
+  <th>Actor</th>
   <th>Action</th>
   <th>Result</th>
   <th>Detail</th>
@@ -15,12 +28,13 @@
 <tr class="{{if not .Success}}error{{end}}">
   <td>{{datetime .CreatedAt}}</td>
   <td class="mono">{{.MAC}}</td>
+  <td>{{.Actor}}</td>
   <td>{{.Action}}</td>
   <td>{{if .Success}}<span class="badge badge-ok">ok</span>{{else}}<span class="badge badge-error">error</span>{{end}}</td>
   <td>{{.Detail}}</td>
 </tr>
 {{else}}
-<tr><td colspan="5" class="empty">No sync events yet.</td></tr>
+<tr><td colspan="6" class="empty">No sync events yet.</td></tr>
 {{end}}
 </tbody>
 </table>

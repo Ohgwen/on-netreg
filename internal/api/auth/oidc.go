@@ -1,6 +1,7 @@
 // Package auth implements login via a generic OIDC provider (authorization
-// code + PKCE). Any user who successfully authenticates gets full access
-// to the dashboard -- there is no role/claim-based authorization.
+// code + PKCE). Any user who successfully authenticates gets access to the
+// dashboard; access to the admin-only Settings area additionally requires
+// membership in a configured group claim (see OIDCConfig.AdminGroup).
 package auth
 
 import (
@@ -23,6 +24,9 @@ type Authenticator struct {
 	oauth2Config oauth2.Config
 	verifier     *oidc.IDTokenVerifier
 	sessions     *sessions.CookieStore
+
+	groupsClaim string
+	adminGroup  string
 }
 
 func New(ctx context.Context, cfg config.OIDCConfig, sessionSecret string) (*Authenticator, error) {
@@ -47,10 +51,17 @@ func New(ctx context.Context, cfg config.OIDCConfig, sessionSecret string) (*Aut
 		SameSite: http.SameSiteLaxMode,
 	}
 
+	groupsClaim := cfg.GroupsClaim
+	if groupsClaim == "" {
+		groupsClaim = "groups"
+	}
+
 	return &Authenticator{
 		oauth2Config: oauth2Config,
 		verifier:     provider.Verifier(&oidc.Config{ClientID: cfg.ClientID}),
 		sessions:     store,
+		groupsClaim:  groupsClaim,
+		adminGroup:   cfg.AdminGroup,
 	}, nil
 }
 
@@ -107,6 +118,11 @@ func (a *Authenticator) CallbackHandler(w http.ResponseWriter, r *http.Request) 
 	}
 	_ = idToken.Claims(&claims)
 
+	var rawClaims map[string]any
+	_ = idToken.Claims(&rawClaims)
+	groups := extractGroups(rawClaims, a.groupsClaim)
+	isAdmin := a.adminGroup == "" || isAdminMember(groups, a.adminGroup)
+
 	user := claims.Email
 	if user == "" {
 		user = claims.Name
@@ -119,6 +135,7 @@ func (a *Authenticator) CallbackHandler(w http.ResponseWriter, r *http.Request) 
 	delete(sess.Values, "pkce_verifier")
 	sess.Values["authenticated"] = true
 	sess.Values["user"] = user
+	sess.Values["is_admin"] = isAdmin
 	if err := sess.Save(r, w); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -146,12 +163,68 @@ func (a *Authenticator) Middleware(next http.Handler) http.Handler {
 	})
 }
 
+// RequireAdmin 403s any request from a user who isn't a member of the
+// configured admin group. Meant to wrap only the Settings routes, inside
+// Middleware.
+func (a *Authenticator) RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !a.CurrentUserIsAdmin(r) {
+			http.Error(w, "forbidden: Settings requires membership in the configured admin group", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // CurrentUser returns the display name/email of the logged-in user, or ""
 // if the request has no valid session.
 func (a *Authenticator) CurrentUser(r *http.Request) string {
 	sess, _ := a.sessions.Get(r, sessionName)
 	user, _ := sess.Values["user"].(string)
 	return user
+}
+
+// CurrentUserIsAdmin reports whether the logged-in user is a member of the
+// configured admin group (or whether no admin group is configured, in
+// which case every authenticated user counts as admin).
+func (a *Authenticator) CurrentUserIsAdmin(r *http.Request) bool {
+	sess, _ := a.sessions.Get(r, sessionName)
+	isAdmin, _ := sess.Values["is_admin"].(bool)
+	return isAdmin
+}
+
+// extractGroups looks up claimName in rawClaims and normalizes it to a
+// string slice: OIDC providers variously report group membership as a JSON
+// array of strings or, for a single group, a bare string.
+func extractGroups(rawClaims map[string]any, claimName string) []string {
+	v, ok := rawClaims[claimName]
+	if !ok {
+		return nil
+	}
+	switch t := v.(type) {
+	case []any:
+		out := make([]string, 0, len(t))
+		for _, item := range t {
+			if s, ok := item.(string); ok {
+				out = append(out, s)
+			}
+		}
+		return out
+	case string:
+		return []string{t}
+	default:
+		return nil
+	}
+}
+
+// isAdminMember reports whether target appears (exact match) in groups.
+func isAdminMember(groups []string, target string) bool {
+	for _, g := range groups {
+		if g == target {
+			return true
+		}
+	}
+	return false
 }
 
 func randString(n int) (string, error) {

@@ -5,6 +5,9 @@ database:
   driver: sqlite          # sqlite or postgres
   dsn: /data/netreg.db     # sqlite file path, or a postgres DSN
 
+# unifi/technitium/dns below are ONE-TIME SEED VALUES ONLY: they populate
+# the database on first startup and are then managed from the webapp under
+# Settings -- editing this file again has no further effect.
 unifi:
   base_url: https://192.168.1.1
   username: netreg-svc
@@ -31,11 +34,19 @@ oidc:
   client_secret: changeme
   redirect_url: http://netreg.example.com/auth/callback
   scopes: [openid, profile, email]
+  # groups_claim/admin_group gate the Settings area (connections, zones) to
+  # a specific group. Leave admin_group blank to give every logged-in user
+  # Settings access too.
+  groups_claim: groups
+  admin_group: ""
 
 server:
   listen_addr: ":8080"
   # Set to false (or run with -disable-auth) to serve the dashboard with no
-  # login at all. INSECURE -- only for local development on a trusted
-  # network. When true (default), oidc.* and session_secret are required.
+  # login at all, and Settings open to anyone. INSECURE -- only for local
+  # development on a trusted network. When true (default), oidc.* is
+  # required.
   auth_enabled: false
+  # Signs OIDC session cookies AND derives the key used to encrypt UniFi/
+  # Technitium passwords stored in the database. Required either way.
   session_secret: changeme-generate-a-random-32-byte-string

@@ -1,0 +1,75 @@
+{{define "content"}}
+<h1>Settings</h1>
+<nav class="subnav">
+  <a href="/settings/">General</a>
+  <a href="/settings/controllers" class="active">UniFi Controllers</a>
+  <a href="/settings/technitium">Technitium</a>
+  <a href="/settings/zones">Zones</a>
+</nav>
+{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+
+<datalist id="zone-options">{{range .ZoneNames}}<option value="{{.}}">{{end}}</datalist>
+
+{{range .ControllerViews}}
+<div class="card">
+  <form method="post" action="/settings/controllers/{{.ID}}" class="form-grid">
+    <label>Name <input type="text" name="name" value="{{.Name}}" required></label>
+    <label>Base URL <input type="text" name="base_url" value="{{.BaseURL}}" placeholder="https://192.168.1.1" required></label>
+    <label>Username <input type="text" name="username" value="{{.Username}}"></label>
+    <label>Password <input type="password" name="password" placeholder="(unchanged)"></label>
+    <label>Site <input type="text" name="site" value="{{.Site}}"></label>
+    <label>Default zone <input type="text" name="default_zone" list="zone-options" value="{{.DefaultZone}}" placeholder="lan.example.com"></label>
+    <label class="checkbox"><input type="checkbox" name="insecure_skip_verify" {{if .InsecureSkipVerify}}checked{{end}}> Skip TLS verification (usually needed for a UDM's self-signed cert)</label>
+    <label class="checkbox"><input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}}> Enabled</label>
+    <div class="actions">
+      <button type="submit">Save</button>
+    </div>
+  </form>
+  <div class="actions">
+    <form method="post" action="/settings/controllers/{{.ID}}/test" class="inline"><button type="submit">Test connection</button></form>
+    <form method="post" action="/settings/controllers/{{.ID}}/refresh-networks" class="inline"><button type="submit">Refresh networks</button></form>
+    <form method="post" action="/settings/controllers/{{.ID}}/delete" class="inline" onsubmit="return confirm('Delete this controller? Its devices will stop syncing.');"><button type="submit" class="danger">Delete</button></form>
+  </div>
+
+  <h2>Networks</h2>
+  <table class="devices">
+  <thead><tr><th>Name</th><th>VLAN</th><th>Subnet</th><th>Zone</th><th>Assign zone</th></tr></thead>
+  <tbody>
+  {{range .Networks}}
+  <tr>
+    <td>{{.Name}}</td>
+    <td>{{.VLAN}}</td>
+    <td class="mono">{{.IPSubnet}}</td>
+    <td class="mono">{{if .Zone}}{{.Zone}}{{else}}<span class="badge badge-muted">controller default</span>{{end}}</td>
+    <td>
+      <form method="post" action="/settings/networks/{{.ID}}/zone" class="inline">
+        <input type="text" name="zone" list="zone-options" value="{{.Zone}}" placeholder="(controller default)">
+        <input type="text" name="new_zone" placeholder="or create new zone">
+        <button type="submit">Set</button>
+      </form>
+    </td>
+  </tr>
+  {{else}}
+  <tr><td colspan="5" class="empty">No networks discovered yet -- click "Refresh networks" above.</td></tr>
+  {{end}}
+  </tbody>
+  </table>
+</div>
+{{else}}
+<p class="empty">No controllers configured yet -- add one below.</p>
+{{end}}
+
+<h1>Add a controller</h1>
+<form method="post" action="/settings/controllers" class="card form-grid">
+  <label>Name <input type="text" name="name" placeholder="Home" required></label>
+  <label>Base URL <input type="text" name="base_url" placeholder="https://192.168.1.1" required></label>
+  <label>Username <input type="text" name="username"></label>
+  <label>Password <input type="password" name="password"></label>
+  <label>Site <input type="text" name="site" placeholder="default"></label>
+  <label>Default zone <input type="text" name="default_zone" list="zone-options" placeholder="lan.example.com"></label>
+  <label class="checkbox"><input type="checkbox" name="insecure_skip_verify"> Skip TLS verification (usually needed for a UDM's self-signed cert)</label>
+  <div class="actions">
+    <button type="submit">Add controller</button>
+  </div>
+</form>
+{{end}}

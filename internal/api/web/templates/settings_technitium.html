@@ -1,0 +1,35 @@
+{{define "content"}}
+<h1>Settings</h1>
+<nav class="subnav">
+  <a href="/settings/">General</a>
+  <a href="/settings/controllers">UniFi Controllers</a>
+  <a href="/settings/technitium" class="active">Technitium</a>
+  <a href="/settings/zones">Zones</a>
+</nav>
+{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+
+<form method="post" action="/settings/technitium" class="card form-grid">
+  <label>Base URL
+    <input type="text" name="base_url" value="{{.TechSettings.BaseURL}}" placeholder="http://technitium:5380">
+  </label>
+  <label>Username
+    <input type="text" name="username" value="{{.TechSettings.Username}}">
+  </label>
+  <label>Password
+    <input type="password" name="password" placeholder="(unchanged)">
+  </label>
+  <p class="hint">Leave blank to keep the currently stored password.</p>
+  <label>Default record TTL (seconds)
+    <input type="text" name="ttl" value="{{.TechSettings.TTL}}">
+  </label>
+  <label class="checkbox"><input type="checkbox" name="create_ptr" {{if .TechSettings.CreatePTR}}checked{{end}}> Create PTR records</label>
+
+  <div class="actions">
+    <button type="submit">Save</button>
+  </div>
+</form>
+
+<form method="post" action="/settings/technitium/test" class="inline">
+  <button type="submit">Test connection</button>
+</form>
+{{end}}

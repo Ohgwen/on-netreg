@@ -1,0 +1,45 @@
+{{define "content"}}
+<h1>Settings</h1>
+<nav class="subnav">
+  <a href="/settings/">General</a>
+  <a href="/settings/controllers">UniFi Controllers</a>
+  <a href="/settings/technitium">Technitium</a>
+  <a href="/settings/zones" class="active">Zones</a>
+</nav>
+{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+
+<table class="devices">
+<thead>
+<tr><th>Zone</th><th>Type</th><th>Status</th></tr>
+</thead>
+<tbody>
+{{range .Zones}}
+<tr>
+  <td class="mono">{{.Name}}</td>
+  <td>{{.Type}}</td>
+  <td>{{if .Disabled}}<span class="badge badge-muted">disabled</span>{{else}}<span class="badge badge-ok">active</span>{{end}}</td>
+</tr>
+{{else}}
+<tr><td colspan="3" class="empty">No zones found -- check the Technitium connection under Settings, or create one below.</td></tr>
+{{end}}
+</tbody>
+</table>
+
+<h1>Create a zone</h1>
+<form method="post" action="/settings/zones/create" class="card form-grid">
+  <label>Zone name
+    <input type="text" name="zone" placeholder="iot.example.com" required>
+  </label>
+  <label>Type
+    <select name="type">
+      <option value="Primary">Primary</option>
+      <option value="Forwarder">Forwarder</option>
+      <option value="SecondaryZone">Secondary</option>
+      <option value="Stub">Stub</option>
+    </select>
+  </label>
+  <div class="actions">
+    <button type="submit">Create zone</button>
+  </div>
+</form>
+{{end}}

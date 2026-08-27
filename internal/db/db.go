@@ -5,6 +5,9 @@ package db
 
 import (
 	"fmt"
+	"log"
+	"os"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/postgres"
@@ -27,7 +30,15 @@ func Open(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	}
 
 	gdb, err := gorm.Open(dialector, &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Warn),
+		// IgnoreRecordNotFoundError is set because the settings package
+		// routinely does get-or-create lookups (e.g. the singleton
+		// AppSettings/TechnitiumSettings rows before they're configured)
+		// where a miss is an expected, not an error-worthy, outcome.
+		Logger: logger.New(log.New(os.Stderr, "", log.LstdFlags), logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  logger.Warn,
+			IgnoreRecordNotFoundError: true,
+		}),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("opening database: %w", err)
@@ -43,7 +54,10 @@ func Open(cfg config.DatabaseConfig) (*gorm.DB, error) {
 // Migrate applies schema migrations. AutoMigrate works unchanged across the
 // sqlite and postgres dialects for the models used here.
 func Migrate(gdb *gorm.DB) error {
-	if err := gdb.AutoMigrate(&Device{}, &SyncEvent{}); err != nil {
+	if err := gdb.AutoMigrate(
+		&Device{}, &SyncEvent{},
+		&UnifiController{}, &UnifiNetwork{}, &TechnitiumSettings{}, &AppSettings{},
+	); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
 	return nil

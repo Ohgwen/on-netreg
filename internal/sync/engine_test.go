@@ -12,6 +12,7 @@ import (
 
 	"github.com/Ohgwen/on-netreg/internal/config"
 	"github.com/Ohgwen/on-netreg/internal/db"
+	"github.com/Ohgwen/on-netreg/internal/settings"
 	"github.com/Ohgwen/on-netreg/internal/technitium"
 	"github.com/Ohgwen/on-netreg/internal/unifi"
 )
@@ -60,26 +61,62 @@ func testDB(t *testing.T) *gorm.DB {
 	return gdb
 }
 
-func testConfig() config.Config {
-	cfg := config.Defaults()
-	cfg.Technitium.Zone = "lan.example.com"
-	return cfg
-}
-
 func silentLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func seedAppSettings(t *testing.T, gdb *gorm.DB) {
+	t.Helper()
+	if err := gdb.Create(&db.AppSettings{ID: 1, FallbackPattern: "{vendor}-{macsuffix}"}).Error; err != nil {
+		t.Fatalf("seeding app settings: %v", err)
+	}
+}
+
+func seedTechnitium(t *testing.T, gdb *gorm.DB) {
+	t.Helper()
+	if err := gdb.Create(&db.TechnitiumSettings{ID: 1}).Error; err != nil {
+		t.Fatalf("seeding technitium settings: %v", err)
+	}
+}
+
+func seedController(t *testing.T, gdb *gorm.DB, defaultZone string) db.UnifiController {
+	t.Helper()
+	ctrl := db.UnifiController{
+		Name:        "default",
+		BaseURL:     "https://udm.local",
+		Site:        "default",
+		DefaultZone: defaultZone,
+		Enabled:     true,
+	}
+	if err := gdb.Create(&ctrl).Error; err != nil {
+		t.Fatalf("seeding controller: %v", err)
+	}
+	return ctrl
+}
+
+func newTestEngine(gdb *gorm.DB, dns DNSClient, uc UnifiClient) *Engine {
+	return &Engine{
+		DB:        gdb,
+		Logger:    silentLogger(),
+		SecretKey: settings.Key("test-secret"),
+		NewUnifiClient: func(config.UnifiConfig) (UnifiClient, error) {
+			return uc, nil
+		},
+		NewDNSClient: func(config.TechnitiumConfig) DNSClient {
+			return dns
+		},
+	}
+}
+
 func TestRunOnceCreatesDeviceAndDNSRecord(t *testing.T) {
 	gdb := testDB(t)
+	seedAppSettings(t, gdb)
+	seedTechnitium(t, gdb)
+	seedController(t, gdb, "lan.example.com")
+
 	dns := &fakeDNS{}
-	e := &Engine{
-		DB:     gdb,
-		Unifi:  fakeUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}},
-		DNS:    dns,
-		Config: testConfig(),
-		Logger: silentLogger(),
-	}
+	uc := fakeUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
+	e := newTestEngine(gdb, dns, uc)
 
 	if err := e.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
@@ -95,6 +132,9 @@ func TestRunOnceCreatesDeviceAndDNSRecord(t *testing.T) {
 	if devices[0].Hostname != "laptop" || !devices[0].DNSRecordSynced {
 		t.Errorf("unexpected device state: %+v", devices[0])
 	}
+	if devices[0].Zone != "lan.example.com" {
+		t.Errorf("zone = %q, want lan.example.com", devices[0].Zone)
+	}
 
 	if len(dns.addCalls) != 1 {
 		t.Fatalf("expected 1 AddRecord call, got %d", len(dns.addCalls))
@@ -106,14 +146,13 @@ func TestRunOnceCreatesDeviceAndDNSRecord(t *testing.T) {
 
 func TestRunOnceMarksDeviceUnsyncedOnDNSFailure(t *testing.T) {
 	gdb := testDB(t)
+	seedAppSettings(t, gdb)
+	seedTechnitium(t, gdb)
+	seedController(t, gdb, "lan.example.com")
+
 	dns := &fakeDNS{addErr: errors.New("technitium unreachable")}
-	e := &Engine{
-		DB:     gdb,
-		Unifi:  fakeUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}},
-		DNS:    dns,
-		Config: testConfig(),
-		Logger: silentLogger(),
-	}
+	uc := fakeUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
+	e := newTestEngine(gdb, dns, uc)
 
 	if err := e.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
@@ -140,22 +179,24 @@ func TestRunOnceMarksDeviceUnsyncedOnDNSFailure(t *testing.T) {
 	if len(events) != 1 || events[0].Success {
 		t.Fatalf("expected 1 failed sync event, got %+v", events)
 	}
+	if events[0].Actor != db.SystemActor {
+		t.Errorf("actor = %q, want %q", events[0].Actor, db.SystemActor)
+	}
 }
 
 func TestRunOnceSkipsExcludedDevice(t *testing.T) {
 	gdb := testDB(t)
-	if err := gdb.Create(&db.Device{MAC: "aa:bb:cc:dd:ee:01", Hostname: "laptop", Excluded: true}).Error; err != nil {
+	seedAppSettings(t, gdb)
+	seedTechnitium(t, gdb)
+	ctrl := seedController(t, gdb, "lan.example.com")
+
+	if err := gdb.Create(&db.Device{MAC: "aa:bb:cc:dd:ee:01", ControllerID: ctrl.ID, Hostname: "laptop", Zone: "lan.example.com", Excluded: true}).Error; err != nil {
 		t.Fatalf("seeding device: %v", err)
 	}
 
 	dns := &fakeDNS{}
-	e := &Engine{
-		DB:     gdb,
-		Unifi:  fakeUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}},
-		DNS:    dns,
-		Config: testConfig(),
-		Logger: silentLogger(),
-	}
+	uc := fakeUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
+	e := newTestEngine(gdb, dns, uc)
 
 	if err := e.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
@@ -163,5 +204,22 @@ func TestRunOnceSkipsExcludedDevice(t *testing.T) {
 
 	if len(dns.addCalls) != 0 || len(dns.updateCalls) != 0 {
 		t.Errorf("expected no DNS calls for excluded device, got add=%d update=%d", len(dns.addCalls), len(dns.updateCalls))
+	}
+}
+
+func TestRunOnceNoOpWithNoControllers(t *testing.T) {
+	gdb := testDB(t)
+	seedAppSettings(t, gdb)
+	seedTechnitium(t, gdb)
+
+	dns := &fakeDNS{}
+	uc := fakeUnifi{}
+	e := newTestEngine(gdb, dns, uc)
+
+	if err := e.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if len(dns.addCalls) != 0 {
+		t.Errorf("expected no DNS calls with no controllers configured")
 	}
 }

@@ -18,6 +18,31 @@ type Device struct {
 
 	IPAddress string `gorm:"size:45"`
 
+	// ControllerID is the UnifiController this device was last seen on.
+	ControllerID uint `gorm:"not null;index"`
+	// NetworkID, if set, is the UnifiNetwork (VLAN) this device was last
+	// seen on. Nil when the client's network hasn't been mapped/refreshed
+	// yet.
+	NetworkID *uint
+	// UniFiNetworkName is the raw network name as reported by the
+	// controller, kept for display even when NetworkID is nil.
+	UniFiNetworkName string
+
+	// Zone is the DNS zone the device's current DNS record actually lives
+	// in (mirrors Hostname/IPAddress as "current synced state"), so a later
+	// zone-mapping change can still locate and update/delete the old
+	// record.
+	Zone string
+
+	// IsFixedIP reflects whether UniFi reports this client with a static
+	// IP assignment, as opposed to a DHCP-leased one.
+	IsFixedIP bool
+	// LeaseEstimatedExpiry is a best-effort estimate (LastSeen + the
+	// client's network's configured DHCP lease time) for dynamic clients.
+	// UniFi's local API does not reliably expose the true lease expiry, so
+	// this is nil whenever the lease time isn't known.
+	LeaseEstimatedExpiry *time.Time
+
 	// Excluded devices are tracked but never synced to DNS.
 	Excluded bool `gorm:"not null;default:false"`
 
@@ -57,19 +82,38 @@ const (
 	SyncEventUpdate SyncEventAction = "update"
 	SyncEventDelete SyncEventAction = "delete"
 	SyncEventError  SyncEventAction = "error"
+
+	// Admin-driven actions, logged from the dashboard/settings handlers
+	// rather than the sync engine.
+	SyncEventOverride       SyncEventAction = "override"
+	SyncEventExclude        SyncEventAction = "exclude"
+	SyncEventInclude        SyncEventAction = "include"
+	SyncEventForget         SyncEventAction = "forget"
+	SyncEventManualSync     SyncEventAction = "manual_sync"
+	SyncEventSettingsChange SyncEventAction = "settings_change"
 )
 
-// SyncEvent is an append-only audit log entry for one sync-loop action
-// taken against a device's DNS record.
+// SystemActor identifies sync-engine-driven events, as opposed to a
+// specific logged-in user's display name/email.
+const SystemActor = "system"
+
+// SyncEvent is an append-only audit log entry: either a sync-loop action
+// taken against a device's DNS record, or an admin action taken from the
+// dashboard/settings UI. Together these form the unified audit log,
+// filterable by device (MAC) or by user (Actor).
 type SyncEvent struct {
 	ID uint `gorm:"primaryKey"`
 
 	DeviceID *uint
 	MAC      string `gorm:"size:17;index"`
 
-	Action  SyncEventAction `gorm:"size:16;not null"`
+	Action  SyncEventAction `gorm:"size:32;not null"`
 	Detail  string
 	Success bool `gorm:"not null"`
+
+	// Actor is SystemActor for sync-engine events, or the logged-in user's
+	// display name/email for actions taken from the webapp.
+	Actor string `gorm:"size:255;index;not null;default:system"`
 
 	CreatedAt time.Time `gorm:"index"`
 }

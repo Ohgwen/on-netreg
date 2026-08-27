@@ -64,23 +64,29 @@ func TestResolveFallsBackWhenBothBlank(t *testing.T) {
 }
 
 func TestDisambiguate(t *testing.T) {
-	taken := map[string]string{"laptop": "aa:bb:cc:dd:ee:01"}
+	taken := map[string]string{TakenKey("lan.example.com", "laptop"): "aa:bb:cc:dd:ee:01"}
 
 	// Different MAC claiming the same name gets suffixed.
-	got := Disambiguate("laptop", "aa:bb:cc:dd:ee:02", taken)
+	got := Disambiguate("laptop", "aa:bb:cc:dd:ee:02", "lan.example.com", taken)
 	if got != "laptop-ee02" {
 		t.Errorf("got %q, want %q", got, "laptop-ee02")
 	}
 
 	// Same MAC re-claiming its own name is unaffected.
-	got = Disambiguate("laptop", "aa:bb:cc:dd:ee:01", taken)
+	got = Disambiguate("laptop", "aa:bb:cc:dd:ee:01", "lan.example.com", taken)
 	if got != "laptop" {
 		t.Errorf("got %q, want %q", got, "laptop")
 	}
 
 	// An unclaimed name passes through untouched.
-	got = Disambiguate("desktop", "aa:bb:cc:dd:ee:03", taken)
+	got = Disambiguate("desktop", "aa:bb:cc:dd:ee:03", "lan.example.com", taken)
 	if got != "desktop" {
 		t.Errorf("got %q, want %q", got, "desktop")
+	}
+
+	// The same name is unclaimed in a different zone.
+	got = Disambiguate("laptop", "aa:bb:cc:dd:ee:02", "iot.example.com", taken)
+	if got != "laptop" {
+		t.Errorf("got %q, want %q", got, "laptop")
 	}
 }

@@ -228,6 +228,36 @@ func (c *Client) GetRecords(ctx context.Context, domain, zone string, listZone b
 	return resp.Response.Records, nil
 }
 
+// ListZones returns every zone hosted on the server.
+// NOTE: response shape not fully confirmed against a live server during
+// development (see the similar disclaimer on UpdateRecordRequest) --
+// verify against your Technitium server's API docs.
+func (c *Client) ListZones(ctx context.Context) ([]ZoneInfo, error) {
+	_, body, err := c.request(ctx, "/api/zones/list", url.Values{})
+	if err != nil {
+		return nil, err
+	}
+	var resp listZonesResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("decoding list-zones response: %w", err)
+	}
+	return resp.Response.Zones, nil
+}
+
+// CreateZone creates a new zone. zoneType is a Technitium zone type such as
+// "Primary" -- see /api/zones/create in the Technitium API docs.
+func (c *Client) CreateZone(ctx context.Context, zone, zoneType string) error {
+	if zoneType == "" {
+		zoneType = "Primary"
+	}
+	q := url.Values{
+		"zone": {zone},
+		"type": {zoneType},
+	}
+	_, _, err := c.request(ctx, "/api/zones/create", q)
+	return err
+}
+
 func cloneValues(v url.Values) url.Values {
 	out := make(url.Values, len(v))
 	for k, vals := range v {

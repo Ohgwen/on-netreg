@@ -67,3 +67,18 @@ type getRecordsResponse struct {
 		Records []DNSRecord `json:"records"`
 	} `json:"response"`
 }
+
+// ZoneInfo describes one zone hosted on the Technitium server, as returned
+// by /api/zones/list.
+type ZoneInfo struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Disabled bool   `json:"disabled"`
+}
+
+type listZonesResponse struct {
+	apiResult
+	Response struct {
+		Zones []ZoneInfo `json:"zones"`
+	} `json:"response"`
+}
