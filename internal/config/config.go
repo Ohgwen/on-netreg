@@ -64,7 +64,11 @@ type OIDCConfig struct {
 }
 
 type ServerConfig struct {
-	ListenAddr    string `yaml:"listen_addr"`
+	ListenAddr string `yaml:"listen_addr"`
+	// AuthEnabled gates OIDC login. When false, the dashboard is served with
+	// no authentication at all -- only for local development/testing on a
+	// trusted network, never for anything internet-reachable.
+	AuthEnabled   bool   `yaml:"auth_enabled"`
 	SessionSecret string `yaml:"session_secret"`
 }
 
@@ -88,7 +92,8 @@ func Defaults() Config {
 			Scopes: []string{"openid", "profile", "email"},
 		},
 		Server: ServerConfig{
-			ListenAddr: ":8080",
+			ListenAddr:  ":8080",
+			AuthEnabled: true,
 		},
 	}
 }
@@ -141,14 +146,16 @@ func (c Config) Validate() error {
 	if c.Technitium.Zone == "" {
 		problems = append(problems, "technitium.zone is required")
 	}
-	if c.OIDC.IssuerURL == "" {
-		problems = append(problems, "oidc.issuer_url is required")
-	}
-	if c.OIDC.ClientID == "" {
-		problems = append(problems, "oidc.client_id is required")
-	}
-	if c.Server.SessionSecret == "" {
-		problems = append(problems, "server.session_secret is required")
+	if c.Server.AuthEnabled {
+		if c.OIDC.IssuerURL == "" {
+			problems = append(problems, "oidc.issuer_url is required (or set server.auth_enabled: false)")
+		}
+		if c.OIDC.ClientID == "" {
+			problems = append(problems, "oidc.client_id is required (or set server.auth_enabled: false)")
+		}
+		if c.Server.SessionSecret == "" {
+			problems = append(problems, "server.session_secret is required (or set server.auth_enabled: false)")
+		}
 	}
 
 	if len(problems) > 0 {
@@ -216,5 +223,6 @@ func applyEnvOverrides(cfg *Config) {
 	}
 
 	str("NETREG_SERVER_LISTEN_ADDR", &cfg.Server.ListenAddr)
+	boolean("NETREG_SERVER_AUTH_ENABLED", &cfg.Server.AuthEnabled)
 	str("NETREG_SERVER_SESSION_SECRET", &cfg.Server.SessionSecret)
 }

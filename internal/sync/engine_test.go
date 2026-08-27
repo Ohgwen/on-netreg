@@ -3,8 +3,9 @@ package sync
 import (
 	"context"
 	"errors"
-	"log/slog"
+	"fmt"
 	"io"
+	"log/slog"
 	"testing"
 
 	"gorm.io/gorm"
@@ -49,7 +50,10 @@ func (f *fakeDNS) DeleteRecord(ctx context.Context, r technitium.DeleteRecordReq
 
 func testDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	gdb, err := db.Open(config.DatabaseConfig{Driver: "sqlite", DSN: "file::memory:?cache=shared"})
+	// Each test gets its own named in-memory database so state from one
+	// test doesn't leak into the next via a shared cache.
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := db.Open(config.DatabaseConfig{Driver: "sqlite", DSN: dsn})
 	if err != nil {
 		t.Fatalf("opening test db: %v", err)
 	}

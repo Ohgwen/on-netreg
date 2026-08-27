@@ -1,0 +1,27 @@
+{{define "content"}}
+<h1>Sync log</h1>
+<table class="events">
+<thead>
+<tr>
+  <th>Time</th>
+  <th>MAC</th>
+  <th>Action</th>
+  <th>Result</th>
+  <th>Detail</th>
+</tr>
+</thead>
+<tbody>
+{{range .Events}}
+<tr class="{{if not .Success}}error{{end}}">
+  <td>{{datetime .CreatedAt}}</td>
+  <td class="mono">{{.MAC}}</td>
+  <td>{{.Action}}</td>
+  <td>{{if .Success}}<span class="badge badge-ok">ok</span>{{else}}<span class="badge badge-error">error</span>{{end}}</td>
+  <td>{{.Detail}}</td>
+</tr>
+{{else}}
+<tr><td colspan="5" class="empty">No sync events yet.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}

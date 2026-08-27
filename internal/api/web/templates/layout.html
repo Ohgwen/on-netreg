@@ -1,0 +1,26 @@
+{{define "layout"}}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · ON-Netreg</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">ON-Netreg</div>
+  <nav>
+    <a href="/">Devices</a>
+    <a href="/events">Sync Log</a>
+  </nav>
+  <div class="user">
+    {{if .User}}{{.User}} &middot; <a href="/logout">Log out</a>{{end}}
+  </div>
+</header>
+<main>
+{{template "content" .}}
+</main>
+</body>
+</html>
+{{end}}

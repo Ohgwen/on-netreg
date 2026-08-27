@@ -1,0 +1,15 @@
+services:
+  netreg:
+    build: .
+    # image: ghcr.io/ohgwen/on-netreg:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - netreg-data:/data
+      - ./config:/etc/netreg/
+    environment:
+      NETREG_CONFIG: /etc/netreg/config.yaml
+    restart: unless-stopped
+
+volumes:
+  netreg-data:

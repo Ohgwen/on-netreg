@@ -1,0 +1,41 @@
+# Copy to config.yaml and fill in, or set the equivalent NETREG_* env vars
+# (see internal/config/config.go) -- env vars always win over this file.
+
+database:
+  driver: sqlite          # sqlite or postgres
+  dsn: /data/netreg.db     # sqlite file path, or a postgres DSN
+
+unifi:
+  base_url: https://192.168.1.1
+  username: netreg-svc
+  password: changeme
+  site: default
+  insecure_skip_verify: true   # usually needed for a UDM's self-signed cert
+  poll_interval: 60s
+
+technitium:
+  base_url: http://technitium:5380
+  username: admin
+  password: changeme
+  zone: lan.example.com
+  ttl: 3600
+  create_ptr: true
+
+dns:
+  fallback_pattern: "{vendor}-{macsuffix}"
+  remove_after_absence_days: 30
+
+oidc:
+  issuer_url: https://technitium.example.com/oidc   # or any OIDC provider
+  client_id: netreg
+  client_secret: changeme
+  redirect_url: http://netreg.example.com/auth/callback
+  scopes: [openid, profile, email]
+
+server:
+  listen_addr: ":8080"
+  # Set to false (or run with -disable-auth) to serve the dashboard with no
+  # login at all. INSECURE -- only for local development on a trusted
+  # network. When true (default), oidc.* and session_secret are required.
+  auth_enabled: false
+  session_secret: changeme-generate-a-random-32-byte-string

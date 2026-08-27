@@ -1,0 +1,5 @@
+.git
+*.md
+config.yaml
+config.example.yaml
+docker-compose.yml
