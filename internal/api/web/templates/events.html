@@ -1,8 +1,10 @@
 {{define "content"}}
 <h1>Sync log</h1>
-<form method="get" action="/events" class="inline filter-form">
-  <input type="text" name="mac" placeholder="Filter by MAC" value="{{.FilterMAC}}">
-  <select name="actor">
+<form method="get" action="/events" class="filter-form">
+  <label class="visually-hidden" for="filter-mac">Filter by MAC</label>
+  <input type="text" id="filter-mac" name="mac" placeholder="Filter by MAC" value="{{.FilterMAC}}">
+  <label class="visually-hidden" for="filter-actor">Filter by user</label>
+  <select id="filter-actor" name="actor">
     <option value="">All users</option>
     {{$selected := .FilterActor}}
     {{range .Actors}}
@@ -12,6 +14,7 @@
   <button type="submit">Filter</button>
   {{if or .FilterMAC .FilterActor}}<a href="/events">Clear</a>{{end}}
 </form>
+<div class="table-wrap">
 <table class="events">
 <thead>
 <tr>
@@ -38,4 +41,5 @@
 {{end}}
 </tbody>
 </table>
+</div>
 {{end}}

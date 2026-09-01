@@ -20,6 +20,13 @@ type Device struct {
 
 	// ControllerID is the UnifiController this device was last seen on.
 	ControllerID uint `gorm:"not null;index"`
+
+	// IdentityID, when set, means this device's MAC is a member of an
+	// Identity: another MAC address speaks for it in DNS, and this device's
+	// own record is intentionally never created/updated by the sync engine
+	// (see internal/registry.Reconcile's skipDNS handling). Denormalized
+	// from IdentityMember for cheap lookups from the dashboard/device pages.
+	IdentityID *uint `gorm:"index"`
 	// NetworkID, if set, is the UnifiNetwork (VLAN) this device was last
 	// seen on. Nil when the client's network hasn't been mapped/refreshed
 	// yet.

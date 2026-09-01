@@ -19,6 +19,14 @@ import (
 	"github.com/Ohgwen/on-netreg/internal/technitium"
 )
 
+// deviceView pairs a Device with the name of the Identity it belongs to (if
+// any), so the dashboard/device pages can show "part of <identity>" instead
+// of the device's own (intentionally unsynced) DNS status.
+type deviceView struct {
+	db.Device
+	IdentityName string
+}
+
 // Engine is the subset of sync.Engine the handlers depend on.
 type Engine interface {
 	RunOnce(ctx context.Context) error
@@ -52,11 +60,11 @@ type pageData struct {
 	IsAdmin bool
 	Flash   string
 
-	Devices []db.Device
+	Devices []deviceView
 	Events  []db.SyncEvent
 
 	// device.html
-	Device db.Device
+	Device deviceView
 
 	// events.html filters
 	Actors      []string
@@ -69,6 +77,10 @@ type pageData struct {
 	ZoneNames       []string
 	TechSettings    db.TechnitiumSettings
 	Zones           []technitium.ZoneInfo
+
+	// settings_identities.html
+	IdentityViews []identityView
+	UnclaimedMACs []string
 }
 
 // Routes returns the authenticated dashboard's routes. Callers are
@@ -128,11 +140,49 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	names, err := h.identityNames(devices)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	views := make([]deviceView, 0, len(devices))
+	for _, d := range devices {
+		view := deviceView{Device: d}
+		if d.IdentityID != nil {
+			view.IdentityName = names[*d.IdentityID]
+		}
+		views = append(views, view)
+	}
 	h.render(w, r, "dashboard", pageData{
 		Title:   "Devices",
-		Devices: devices,
+		Devices: views,
 		Flash:   r.URL.Query().Get("flash"),
 	})
+}
+
+// identityNames looks up the Identity name for every non-nil IdentityID
+// among devices, keyed by identity ID for cheap lookup while rendering.
+func (h *Handlers) identityNames(devices []db.Device) (map[uint]string, error) {
+	ids := make([]uint, 0)
+	seen := make(map[uint]bool)
+	for _, d := range devices {
+		if d.IdentityID != nil && !seen[*d.IdentityID] {
+			seen[*d.IdentityID] = true
+			ids = append(ids, *d.IdentityID)
+		}
+	}
+	names := make(map[uint]string)
+	if len(ids) == 0 {
+		return names, nil
+	}
+	var identities []db.Identity
+	if err := h.DB.Where("id IN ?", ids).Find(&identities).Error; err != nil {
+		return nil, err
+	}
+	for _, i := range identities {
+		names[i.ID] = i.Name
+	}
+	return names, nil
 }
 
 func (h *Handlers) deviceDetail(w http.ResponseWriter, r *http.Request) {
@@ -145,9 +195,16 @@ func (h *Handlers) deviceDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	view := deviceView{Device: dev}
+	if dev.IdentityID != nil {
+		var ident db.Identity
+		if err := h.DB.First(&ident, *dev.IdentityID).Error; err == nil {
+			view.IdentityName = ident.Name
+		}
+	}
 	h.render(w, r, "device", pageData{
 		Title:  dev.EffectiveHostname(),
-		Device: dev,
+		Device: view,
 		Events: events,
 	})
 }

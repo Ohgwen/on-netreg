@@ -5,12 +5,13 @@
   <a href="/settings/controllers">UniFi Controllers</a>
   <a href="/settings/technitium">Technitium</a>
   <a href="/settings/zones">Zones</a>
+  <a href="/settings/identities">Identities</a>
 </nav>
-{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+{{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
 
 <form method="post" action="/settings/general" class="card form-grid">
   <label>Default DNS zone
-    <input type="text" name="default_zone" list="zone-options" value="{{.AppSettings.DefaultZone}}" placeholder="lan.example.com">
+    <input type="text" name="default_zone" list="zone-options" value="{{.AppSettings.DefaultZone}}" placeholder="lan.example.com" autocomplete="off">
   </label>
   <datalist id="zone-options">
     {{range .ZoneNames}}<option value="{{.}}">{{end}}
@@ -18,16 +19,16 @@
   <p class="hint">Used when a device's controller and network have no zone of their own set.</p>
 
   <label>Fallback hostname pattern
-    <input type="text" name="fallback_pattern" value="{{.AppSettings.FallbackPattern}}" placeholder="{vendor}-{macsuffix}">
+    <input type="text" name="fallback_pattern" value="{{.AppSettings.FallbackPattern}}" placeholder="{vendor}-{macsuffix}" autocomplete="off">
   </label>
   <p class="hint">Supports <code>{vendor}</code> and <code>{macsuffix}</code> placeholders.</p>
 
   <label>Remove DNS record after absence (days, 0 = never)
-    <input type="text" name="remove_after_absence_days" value="{{.AppSettings.RemoveAfterAbsenceDays}}">
+    <input type="text" name="remove_after_absence_days" value="{{.AppSettings.RemoveAfterAbsenceDays}}" inputmode="numeric" pattern="[0-9]*">
   </label>
 
   <label>Poll interval
-    <input type="text" name="poll_interval" value="{{.AppSettings.PollInterval}}" placeholder="60s">
+    <input type="text" name="poll_interval" value="{{.AppSettings.PollInterval}}" placeholder="60s" autocomplete="off">
   </label>
   <p class="hint">Takes effect after a restart.</p>
 

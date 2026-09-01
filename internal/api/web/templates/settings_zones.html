@@ -5,9 +5,11 @@
   <a href="/settings/controllers">UniFi Controllers</a>
   <a href="/settings/technitium">Technitium</a>
   <a href="/settings/zones" class="active">Zones</a>
+  <a href="/settings/identities">Identities</a>
 </nav>
-{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+{{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
 
+<div class="table-wrap">
 <table class="devices">
 <thead>
 <tr><th>Zone</th><th>Type</th><th>Status</th></tr>
@@ -24,11 +26,12 @@
 {{end}}
 </tbody>
 </table>
+</div>
 
 <h1>Create a zone</h1>
 <form method="post" action="/settings/zones/create" class="card form-grid">
   <label>Zone name
-    <input type="text" name="zone" placeholder="iot.example.com" required>
+    <input type="text" name="zone" placeholder="iot.example.com" required autocomplete="off">
   </label>
   <label>Type
     <select name="type">

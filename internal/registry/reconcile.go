@@ -65,7 +65,13 @@ type ZoneResolver func(client unifi.NetworkClient) NetworkInfo
 // devices. It is a pure function: no I/O, fully deterministic given its
 // inputs, so it can be unit tested without a live UniFi controller or
 // Technitium server.
-func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []unifi.NetworkClient, cfg config.DNSConfig, resolveNetwork ZoneResolver) Result {
+//
+// skipDNS is the set of MACs that belong to an Identity (see
+// internal/db.Identity): their own per-MAC DNS record is never
+// created/updated/deleted here, since another MAC speaks for them, but they
+// are still tracked -- IP/LastSeen/network fields update every cycle exactly
+// like any other device. A nil map means "no identity members".
+func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []unifi.NetworkClient, cfg config.DNSConfig, resolveNetwork ZoneResolver, skipDNS map[string]bool) Result {
 	existingByMAC := make(map[string]db.Device, len(existing))
 	for _, d := range existing {
 		existingByMAC[d.MAC] = d
@@ -89,7 +95,7 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 
 		hasValidIP := HasValidIP(client.IP)
 
-		if found && existingDevice.Excluded {
+		if found && (existingDevice.Excluded || skipDNS[client.MAC]) {
 			dev := existingDevice
 			if hasValidIP {
 				dev.IPAddress = client.IP
@@ -127,9 +133,14 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 			}
 			// A client with no valid IP yet (still negotiating DHCP, or
 			// disconnected) is tracked for visibility but never gets a DNS
-			// record until it actually has an address.
+			// record until it actually has an address. Identity members are
+			// tracked (including their IP) exactly like any other device,
+			// but never get their own DNS record -- another MAC speaks for
+			// them.
 			if hasValidIP {
 				dev.IPAddress = client.IP
+			}
+			if hasValidIP && !skipDNS[client.MAC] {
 				result.Changes = append(result.Changes, Change{
 					Kind:      ChangeCreate,
 					MAC:       client.MAC,

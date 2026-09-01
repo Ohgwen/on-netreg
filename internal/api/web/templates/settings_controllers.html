@@ -5,20 +5,21 @@
   <a href="/settings/controllers" class="active">UniFi Controllers</a>
   <a href="/settings/technitium">Technitium</a>
   <a href="/settings/zones">Zones</a>
+  <a href="/settings/identities">Identities</a>
 </nav>
-{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+{{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
 
 <datalist id="zone-options">{{range .ZoneNames}}<option value="{{.}}">{{end}}</datalist>
 
 {{range .ControllerViews}}
 <div class="card">
   <form method="post" action="/settings/controllers/{{.ID}}" class="form-grid">
-    <label>Name <input type="text" name="name" value="{{.Name}}" required></label>
-    <label>Base URL <input type="text" name="base_url" value="{{.BaseURL}}" placeholder="https://192.168.1.1" required></label>
-    <label>Username <input type="text" name="username" value="{{.Username}}"></label>
-    <label>Password <input type="password" name="password" placeholder="(unchanged)"></label>
-    <label>Site <input type="text" name="site" value="{{.Site}}"></label>
-    <label>Default zone <input type="text" name="default_zone" list="zone-options" value="{{.DefaultZone}}" placeholder="lan.example.com"></label>
+    <label>Name <input type="text" name="name" value="{{.Name}}" required autocomplete="off"></label>
+    <label>Base URL <input type="text" name="base_url" value="{{.BaseURL}}" placeholder="https://192.168.1.1" required autocomplete="url" inputmode="url"></label>
+    <label>Username <input type="text" name="username" value="{{.Username}}" autocomplete="username"></label>
+    <label>Password <input type="password" name="password" placeholder="(unchanged)" autocomplete="current-password"></label>
+    <label>Site <input type="text" name="site" value="{{.Site}}" autocomplete="off"></label>
+    <label>Default zone <input type="text" name="default_zone" list="zone-options" value="{{.DefaultZone}}" placeholder="lan.example.com" autocomplete="off"></label>
     <label class="checkbox"><input type="checkbox" name="insecure_skip_verify" {{if .InsecureSkipVerify}}checked{{end}}> Skip TLS verification (usually needed for a UDM's self-signed cert)</label>
     <label class="checkbox"><input type="checkbox" name="enabled" {{if .Enabled}}checked{{end}}> Enabled</label>
     <div class="actions">
@@ -32,6 +33,7 @@
   </div>
 
   <h2>Networks</h2>
+  <div class="table-wrap">
   <table class="devices">
   <thead><tr><th>Name</th><th>VLAN</th><th>Subnet</th><th>Zone</th><th>Assign zone</th></tr></thead>
   <tbody>
@@ -43,8 +45,10 @@
     <td class="mono">{{if .Zone}}{{.Zone}}{{else}}<span class="badge badge-muted">controller default</span>{{end}}</td>
     <td>
       <form method="post" action="/settings/networks/{{.ID}}/zone" class="inline">
-        <input type="text" name="zone" list="zone-options" value="{{.Zone}}" placeholder="(controller default)">
-        <input type="text" name="new_zone" placeholder="or create new zone">
+        <label class="visually-hidden" for="zone-{{.ID}}">Zone for {{.Name}}</label>
+        <input type="text" id="zone-{{.ID}}" name="zone" list="zone-options" value="{{.Zone}}" placeholder="(controller default)" autocomplete="off">
+        <label class="visually-hidden" for="new-zone-{{.ID}}">New zone for {{.Name}}</label>
+        <input type="text" id="new-zone-{{.ID}}" name="new_zone" placeholder="or create new zone" autocomplete="off">
         <button type="submit">Set</button>
       </form>
     </td>
@@ -54,6 +58,7 @@
   {{end}}
   </tbody>
   </table>
+  </div>
 </div>
 {{else}}
 <p class="empty">No controllers configured yet -- add one below.</p>
@@ -61,12 +66,12 @@
 
 <h1>Add a controller</h1>
 <form method="post" action="/settings/controllers" class="card form-grid">
-  <label>Name <input type="text" name="name" placeholder="Home" required></label>
-  <label>Base URL <input type="text" name="base_url" placeholder="https://192.168.1.1" required></label>
-  <label>Username <input type="text" name="username"></label>
-  <label>Password <input type="password" name="password"></label>
-  <label>Site <input type="text" name="site" placeholder="default"></label>
-  <label>Default zone <input type="text" name="default_zone" list="zone-options" placeholder="lan.example.com"></label>
+  <label>Name <input type="text" name="name" placeholder="Home" required autocomplete="off"></label>
+  <label>Base URL <input type="text" name="base_url" placeholder="https://192.168.1.1" required autocomplete="url" inputmode="url"></label>
+  <label>Username <input type="text" name="username" autocomplete="username"></label>
+  <label>Password <input type="password" name="password" autocomplete="new-password"></label>
+  <label>Site <input type="text" name="site" placeholder="default" autocomplete="off"></label>
+  <label>Default zone <input type="text" name="default_zone" list="zone-options" placeholder="lan.example.com" autocomplete="off"></label>
   <label class="checkbox"><input type="checkbox" name="insecure_skip_verify"> Skip TLS verification (usually needed for a UDM's self-signed cert)</label>
   <div class="actions">
     <button type="submit">Add controller</button>

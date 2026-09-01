@@ -14,11 +14,20 @@ import (
 
 	"github.com/Ohgwen/on-netreg/internal/config"
 	"github.com/Ohgwen/on-netreg/internal/db"
+	"github.com/Ohgwen/on-netreg/internal/netcheck"
 	"github.com/Ohgwen/on-netreg/internal/registry"
 	"github.com/Ohgwen/on-netreg/internal/settings"
 	"github.com/Ohgwen/on-netreg/internal/technitium"
 	"github.com/Ohgwen/on-netreg/internal/unifi"
 )
+
+// livenessTimeout bounds each per-member ping/TCP liveness probe run during
+// identity sync.
+const livenessTimeout = 2 * time.Second
+
+// dnsVerifyTimeout bounds the post-write DNS lookup that confirms an
+// identity's record actually resolves as expected.
+const dnsVerifyTimeout = 3 * time.Second
 
 // UnifiClient is the subset of the UniFi API client the engine depends on.
 // Defined here so tests can supply a fake.
@@ -44,6 +53,29 @@ type Engine struct {
 	// unifi.New / technitium.New; overridable in tests.
 	NewUnifiClient func(config.UnifiConfig) (UnifiClient, error)
 	NewDNSClient   func(config.TechnitiumConfig) DNSClient
+
+	// NewIsAlive builds the liveness probe used to pick which Identity
+	// member currently backs a shared DNS record. Defaults to
+	// netcheck.New(livenessTimeout); overridable in tests.
+	NewIsAlive func() func(ip string) bool
+	// VerifyDNS performs the post-write "does this actually resolve"
+	// lookup for an Identity's record. Defaults to technitium.Verify;
+	// overridable in tests.
+	VerifyDNS func(ctx context.Context, dnsHost, fqdn, expectedIP string, timeout time.Duration) error
+}
+
+func (e *Engine) isAliveFunc() func(ip string) bool {
+	if e.NewIsAlive != nil {
+		return e.NewIsAlive()
+	}
+	return netcheck.New(livenessTimeout)
+}
+
+func (e *Engine) verifyDNS(ctx context.Context, dnsHost, fqdn, expectedIP string, timeout time.Duration) error {
+	if e.VerifyDNS != nil {
+		return e.VerifyDNS(ctx, dnsHost, fqdn, expectedIP, timeout)
+	}
+	return technitium.Verify(ctx, dnsHost, fqdn, expectedIP, timeout)
 }
 
 // Run blocks, running one reconciliation cycle immediately and then on
@@ -110,17 +142,32 @@ func (e *Engine) RunOnce(ctx context.Context) error {
 		networksByController[n.ControllerID] = append(networksByController[n.ControllerID], n)
 	}
 
+	var members []db.IdentityMember
+	if err := e.DB.Find(&members).Error; err != nil {
+		return fmt.Errorf("loading identity members: %w", err)
+	}
+	skipDNS := make(map[string]bool, len(members))
+	for _, m := range members {
+		skipDNS[m.MAC] = true
+	}
+
 	var errs []error
 	for _, ctrl := range controllers {
-		if err := e.syncController(ctx, ctrl, networksByController[ctrl.ID], dns, dnsCfg, appSettings); err != nil {
+		if err := e.syncController(ctx, ctrl, networksByController[ctrl.ID], dns, dnsCfg, appSettings, skipDNS); err != nil {
 			e.Logger.Error("sync failed for controller", "controller", ctrl.Name, "error", err)
 			errs = append(errs, fmt.Errorf("controller %q: %w", ctrl.Name, err))
 		}
 	}
+
+	if err := e.syncIdentities(ctx, dns, dnsCfg, appSettings); err != nil {
+		e.Logger.Error("syncing identities failed", "error", err)
+		errs = append(errs, fmt.Errorf("syncing identities: %w", err))
+	}
+
 	return errors.Join(errs...)
 }
 
-func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRuntime, networks []db.UnifiNetwork, dns DNSClient, dnsCfg config.TechnitiumConfig, appSettings db.AppSettings) error {
+func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRuntime, networks []db.UnifiNetwork, dns DNSClient, dnsCfg config.TechnitiumConfig, appSettings db.AppSettings, skipDNS map[string]bool) error {
 	unifiClient, err := e.NewUnifiClient(ctrl.Config)
 	if err != nil {
 		return fmt.Errorf("creating unifi client: %w", err)
@@ -164,7 +211,7 @@ func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRun
 	}
 
 	now := time.Now()
-	result := registry.Reconcile(now, ctrl.ID, existing, seen, dnsConfig, resolver)
+	result := registry.Reconcile(now, ctrl.ID, existing, seen, dnsConfig, resolver, skipDNS)
 
 	outcomes := e.applyChanges(ctx, dns, dnsCfg, result.Changes)
 

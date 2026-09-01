@@ -5,22 +5,23 @@
   <a href="/settings/controllers">UniFi Controllers</a>
   <a href="/settings/technitium" class="active">Technitium</a>
   <a href="/settings/zones">Zones</a>
+  <a href="/settings/identities">Identities</a>
 </nav>
-{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+{{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
 
 <form method="post" action="/settings/technitium" class="card form-grid">
   <label>Base URL
-    <input type="text" name="base_url" value="{{.TechSettings.BaseURL}}" placeholder="http://technitium:5380">
+    <input type="text" name="base_url" value="{{.TechSettings.BaseURL}}" placeholder="http://technitium:5380" autocomplete="url" inputmode="url">
   </label>
   <label>Username
-    <input type="text" name="username" value="{{.TechSettings.Username}}">
+    <input type="text" name="username" value="{{.TechSettings.Username}}" autocomplete="username">
   </label>
   <label>Password
-    <input type="password" name="password" placeholder="(unchanged)">
+    <input type="password" name="password" placeholder="(unchanged)" autocomplete="current-password">
   </label>
   <p class="hint">Leave blank to keep the currently stored password.</p>
   <label>Default record TTL (seconds)
-    <input type="text" name="ttl" value="{{.TechSettings.TTL}}">
+    <input type="text" name="ttl" value="{{.TechSettings.TTL}}" inputmode="numeric" pattern="[0-9]*">
   </label>
   <label class="checkbox"><input type="checkbox" name="create_ptr" {{if .TechSettings.CreatePTR}}checked{{end}}> Create PTR records</label>
 

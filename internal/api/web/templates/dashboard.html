@@ -5,7 +5,8 @@
     <button type="submit">Sync now</button>
   </form>
 </div>
-{{if .Flash}}<p class="flash">{{.Flash}}</p>{{end}}
+{{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
+<div class="table-wrap">
 <table class="devices">
 <thead>
 <tr>
@@ -37,25 +38,27 @@
   <td class="mono">{{.IPAddress}}</td>
   <td>{{datetime .LastSeen}}</td>
   <td>
-    {{if .Excluded}}<span class="badge badge-muted">excluded</span>
+    {{if .IdentityName}}<span class="badge badge-muted" title="this MAC's own record is suppressed -- {{.IdentityName}} speaks for it">part of {{.IdentityName}}</span>
+    {{else if .Excluded}}<span class="badge badge-muted">excluded</span>
     {{else if .DNSRecordSynced}}<span class="badge badge-ok">synced</span>
     {{else if not .IPAddress}}<span class="badge badge-muted" title="no DNS record until it has an address">no IP</span>
     {{else}}<span class="badge badge-error" title="{{.LastSyncError}}">error</span>{{end}}
   </td>
   <td>
     <form method="post" action="/devices/{{.ID}}/override" class="inline">
-      <input type="text" name="hostname" placeholder="(auto)" value="{{.OverrideValue}}">
+      <label class="visually-hidden" for="hostname-{{.ID}}">Hostname override for {{.EffectiveHostname}}</label>
+      <input type="text" id="hostname-{{.ID}}" name="hostname" placeholder="(auto)" value="{{.OverrideValue}}" autocomplete="off">
       <button type="submit">Set</button>
     </form>
   </td>
   <td>
     <form method="post" action="/devices/{{.ID}}/exclude" class="inline">
-      <button type="submit">{{if .Excluded}}Include{{else}}Exclude{{end}}</button>
+      <button type="submit" aria-label="{{if .Excluded}}Include{{else}}Exclude{{end}} {{.EffectiveHostname}}">{{if .Excluded}}Include{{else}}Exclude{{end}}</button>
     </form>
   </td>
   <td>
     <form method="post" action="/devices/{{.ID}}/forget" class="inline" onsubmit="return confirm('Forget this device and remove its DNS record?');">
-      <button type="submit" class="danger">Forget</button>
+      <button type="submit" class="danger" aria-label="Forget {{.EffectiveHostname}}">Forget</button>
     </form>
   </td>
 </tr>
@@ -64,4 +67,5 @@
 {{end}}
 </tbody>
 </table>
+</div>
 {{end}}

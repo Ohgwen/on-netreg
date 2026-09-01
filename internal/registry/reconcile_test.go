@@ -25,7 +25,7 @@ func TestReconcileCreatesNewDevice(t *testing.T) {
 	now := time.Now()
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 
-	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Devices) != 1 {
 		t.Fatalf("expected 1 device, got %d", len(result.Devices))
@@ -59,7 +59,7 @@ func TestReconcileNoChangeWhenNothingChanged(t *testing.T) {
 	}}
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 
-	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 0 {
 		t.Fatalf("expected no changes, got %+v", result.Changes)
@@ -81,7 +81,7 @@ func TestReconcileUpdatesOnIPChange(t *testing.T) {
 	}}
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 
-	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 1 || result.Changes[0].Kind != ChangeUpdate {
 		t.Fatalf("expected 1 update change, got %+v", result.Changes)
@@ -106,7 +106,7 @@ func TestReconcileZoneChangeEmitsDeleteAndCreate(t *testing.T) {
 	}}
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 
-	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone("new.example.com"))
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone("new.example.com"), nil)
 
 	if len(result.Changes) != 2 {
 		t.Fatalf("expected 2 changes (delete+create), got %+v", result.Changes)
@@ -130,7 +130,7 @@ func TestReconcileExcludedDeviceNeverSynced(t *testing.T) {
 	}}
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 
-	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 0 {
 		t.Fatalf("expected no changes for excluded device, got %+v", result.Changes)
@@ -154,7 +154,7 @@ func TestReconcileOverrideHostnameWins(t *testing.T) {
 	}}
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 
-	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 1 || result.Changes[0].Hostname != "my-custom-name" {
 		t.Fatalf("expected update to override hostname, got %+v", result.Changes)
@@ -168,7 +168,7 @@ func TestReconcileCollisionGetsDisambiguated(t *testing.T) {
 		makeClient("aa:bb:cc:dd:ee:02", "Laptop", ""),
 	}
 
-	result := Reconcile(now, 1, nil, clients, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, nil, clients, testDNSConfig, fixedZone(testZone), nil)
 
 	names := map[string]bool{}
 	for _, d := range result.Devices {
@@ -196,7 +196,7 @@ func TestReconcileSameNameDifferentZonesNotDisambiguated(t *testing.T) {
 		return NetworkInfo{Zone: zones[c.MAC]}
 	}
 
-	result := Reconcile(now, 1, nil, clients, testDNSConfig, resolver)
+	result := Reconcile(now, 1, nil, clients, testDNSConfig, resolver, nil)
 
 	for _, d := range result.Devices {
 		if d.Hostname != "laptop" {
@@ -215,7 +215,7 @@ func TestReconcileDoesNotRemoveByDefaultWhenAbsent(t *testing.T) {
 		LastSeen:        now.Add(-30 * 24 * time.Hour),
 	}}
 
-	result := Reconcile(now, 1, existing, nil, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, nil, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 0 {
 		t.Fatalf("expected no removal by default (remove_after_absence_days=0), got %+v", result.Changes)
@@ -233,7 +233,7 @@ func TestReconcileRemovesAfterConfiguredAbsence(t *testing.T) {
 		LastSeen:        now.Add(-10 * 24 * time.Hour),
 	}}
 
-	result := Reconcile(now, 1, existing, nil, cfg, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, nil, cfg, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 1 || result.Changes[0].Kind != ChangeDelete {
 		t.Fatalf("expected 1 delete change, got %+v", result.Changes)
@@ -251,7 +251,7 @@ func TestReconcileDoesNotRemoveBeforeAbsenceThreshold(t *testing.T) {
 		LastSeen:        now.Add(-3 * 24 * time.Hour),
 	}}
 
-	result := Reconcile(now, 1, existing, nil, cfg, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, nil, cfg, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 0 {
 		t.Fatalf("expected no removal before threshold, got %+v", result.Changes)
@@ -265,7 +265,7 @@ func TestReconcileEstimatesLeaseExpiryForDHCPClient(t *testing.T) {
 		return NetworkInfo{Zone: testZone, LeaseSeconds: 3600}
 	}
 
-	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, resolver)
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, resolver, nil)
 
 	dev := result.Devices[0]
 	if dev.LeaseEstimatedExpiry == nil {
@@ -282,7 +282,7 @@ func TestReconcileNewClientWithNoIPIsTrackedButNotSynced(t *testing.T) {
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 	client.IP = ""
 
-	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 0 {
 		t.Fatalf("expected no DNS changes for a client with no IP, got %+v", result.Changes)
@@ -300,7 +300,7 @@ func TestReconcileNewClientWithMalformedIPIsNotSynced(t *testing.T) {
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 	client.IP = "not-an-ip"
 
-	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 0 {
 		t.Fatalf("expected no DNS changes for a client with a malformed IP, got %+v", result.Changes)
@@ -320,7 +320,7 @@ func TestReconcileTakesDownRecordWhenIPBecomesInvalid(t *testing.T) {
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 	client.IP = ""
 
-	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 1 || result.Changes[0].Kind != ChangeDelete {
 		t.Fatalf("expected 1 delete change, got %+v", result.Changes)
@@ -350,7 +350,7 @@ func TestReconcileDoesNotRedeleteAlreadyUnsyncedDevice(t *testing.T) {
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 	client.IP = ""
 
-	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 0 {
 		t.Fatalf("expected no changes for an already-unsynced device with no IP, got %+v", result.Changes)
@@ -369,7 +369,7 @@ func TestReconcileRecreatesRecordWhenIPReturnsAfterBeingTakenDown(t *testing.T) 
 	}}
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
 
-	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
 	if len(result.Changes) != 1 || result.Changes[0].Kind != ChangeCreate {
 		t.Fatalf("expected 1 create change (not update), got %+v", result.Changes)
@@ -394,6 +394,47 @@ func TestHasValidIP(t *testing.T) {
 	}
 }
 
+func TestReconcileSkipDNSSuppressesRecordForExistingDevice(t *testing.T) {
+	now := time.Now()
+	existing := []db.Device{{
+		MAC:             "aa:bb:cc:dd:ee:01",
+		Hostname:        "laptop",
+		Zone:            testZone,
+		IPAddress:       "192.168.1.50",
+		DNSRecordSynced: true,
+		LastSeen:        now.Add(-time.Minute),
+	}}
+	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	skip := map[string]bool{"aa:bb:cc:dd:ee:01": true}
+
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), skip)
+
+	if len(result.Changes) != 0 {
+		t.Fatalf("expected no DNS changes for an identity-member device, got %+v", result.Changes)
+	}
+	if result.Devices[0].IPAddress != "192.168.1.100" {
+		t.Errorf("expected IP to still be tracked, got %q", result.Devices[0].IPAddress)
+	}
+	if !result.Devices[0].LastSeen.Equal(now) {
+		t.Errorf("expected LastSeen updated to now")
+	}
+}
+
+func TestReconcileSkipDNSSuppressesRecordForNewDevice(t *testing.T) {
+	now := time.Now()
+	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	skip := map[string]bool{"aa:bb:cc:dd:ee:01": true}
+
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), skip)
+
+	if len(result.Changes) != 0 {
+		t.Fatalf("expected no DNS changes for a brand-new identity-member device, got %+v", result.Changes)
+	}
+	if len(result.Devices) != 1 || result.Devices[0].IPAddress != "192.168.1.100" {
+		t.Fatalf("expected the device to still be tracked with its IP, got %+v", result.Devices)
+	}
+}
+
 func TestReconcileNoLeaseExpiryForFixedIPClient(t *testing.T) {
 	now := time.Now()
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
@@ -402,7 +443,7 @@ func TestReconcileNoLeaseExpiryForFixedIPClient(t *testing.T) {
 		return NetworkInfo{Zone: testZone, LeaseSeconds: 3600}
 	}
 
-	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, resolver)
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, resolver, nil)
 
 	if result.Devices[0].LeaseEstimatedExpiry != nil {
 		t.Errorf("expected no estimated lease expiry for a fixed-IP client")

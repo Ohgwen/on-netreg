@@ -61,6 +61,8 @@ func (h *SettingsHandlers) Routes() http.Handler {
 	mux.HandleFunc("GET /settings/zones", h.zonesPage)
 	mux.HandleFunc("POST /settings/zones/create", h.createZone)
 
+	h.identitiesRoutes(mux)
+
 	return mux
 }
 
