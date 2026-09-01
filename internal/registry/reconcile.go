@@ -214,6 +214,9 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 		dev.NetworkID = info.NetworkID
 		dev.IsFixedIP = client.IsFixedIP
 		dev.LeaseEstimatedExpiry = estimateLeaseExpiry(now, client.IsFixedIP, info.LeaseSeconds)
+		// Once a record is taken down for having no valid address, don't
+		// keep showing the stale IP as if it were still current.
+		dev.IPAddress = ""
 		if hasValidIP {
 			dev.IPAddress = client.IP
 		}
@@ -240,6 +243,14 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 	}
 
 	return result
+}
+
+// HasValidIP reports whether ip is a non-empty, parseable IP address.
+// Devices are only synced to DNS while they have one; a blank or malformed
+// address (disconnected, mid-DHCP-negotiation, garbage from the API) takes
+// any existing record down instead of leaving it pointed at a stale value.
+func HasValidIP(ip string) bool {
+	return ip != "" && net.ParseIP(ip) != nil
 }
 
 func shouldRemove(dev db.Device, now time.Time, cfg config.DNSConfig) bool {

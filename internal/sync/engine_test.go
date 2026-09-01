@@ -207,6 +207,73 @@ func TestRunOnceSkipsExcludedDevice(t *testing.T) {
 	}
 }
 
+func TestRunOnceTakesDownAndRecreatesRecordAsIPComesAndGoes(t *testing.T) {
+	gdb := testDB(t)
+	seedAppSettings(t, gdb)
+	seedTechnitium(t, gdb)
+	seedController(t, gdb, "lan.example.com")
+
+	dns := &fakeDNS{}
+	uc := &mutableUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
+	e := newTestEngine(gdb, dns, uc)
+
+	// Cycle 1: device has an IP, gets created and marked synced.
+	if err := e.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce (create): %v", err)
+	}
+	var dev db.Device
+	if err := gdb.First(&dev).Error; err != nil {
+		t.Fatalf("querying device: %v", err)
+	}
+	if !dev.DNSRecordSynced || len(dns.addCalls) != 1 {
+		t.Fatalf("expected device synced after create, got synced=%v addCalls=%d", dev.DNSRecordSynced, len(dns.addCalls))
+	}
+
+	// Cycle 2: the client loses its IP -- the record should come down and
+	// DNSRecordSynced should flip to false (not stay true, which would
+	// silently leave the stale record in Technitium forever).
+	uc.clients[0].IP = ""
+	if err := e.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce (delete): %v", err)
+	}
+	if err := gdb.First(&dev).Error; err != nil {
+		t.Fatalf("querying device: %v", err)
+	}
+	if dev.DNSRecordSynced {
+		t.Errorf("expected DNSRecordSynced=false after the record was taken down")
+	}
+	if len(dns.deleteCalls) != 1 {
+		t.Fatalf("expected 1 DeleteRecord call, got %d", len(dns.deleteCalls))
+	}
+
+	// Cycle 3: the IP comes back -- the record should be (re)created, not
+	// "updated" against a record that no longer exists.
+	uc.clients[0].IP = "192.168.1.100"
+	if err := e.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce (recreate): %v", err)
+	}
+	if err := gdb.First(&dev).Error; err != nil {
+		t.Fatalf("querying device: %v", err)
+	}
+	if !dev.DNSRecordSynced {
+		t.Errorf("expected DNSRecordSynced=true after the record was recreated")
+	}
+	if len(dns.addCalls) != 2 {
+		t.Fatalf("expected a 2nd AddRecord call to recreate the record, got %d total", len(dns.addCalls))
+	}
+	if len(dns.updateCalls) != 0 {
+		t.Errorf("expected no UpdateRecord calls (nothing to update -- the record was gone), got %d", len(dns.updateCalls))
+	}
+}
+
+type mutableUnifi struct {
+	clients []unifi.NetworkClient
+}
+
+func (m *mutableUnifi) FetchClients(ctx context.Context) ([]unifi.NetworkClient, error) {
+	return m.clients, nil
+}
+
 func TestRunOnceNoOpWithNoControllers(t *testing.T) {
 	gdb := testDB(t)
 	seedAppSettings(t, gdb)

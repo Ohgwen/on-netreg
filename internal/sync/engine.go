@@ -221,7 +221,11 @@ func (e *Engine) applyChanges(ctx context.Context, dns DNSClient, dnsCfg config.
 			})
 		}
 
-		outcome := applyOutcome{synced: applyErr == nil}
+		// synced tracks whether a DNS record now exists for this device: true
+		// after a successful create/update, false after a successful delete
+		// (or a failed create/update). A failed delete is the one exception --
+		// the old record likely still exists, so it's left marked present.
+		outcome := applyOutcome{synced: applyErr == nil && change.Kind != registry.ChangeDelete}
 		if applyErr != nil {
 			outcome.errMsg = applyErr.Error()
 			if change.Kind == registry.ChangeDelete {

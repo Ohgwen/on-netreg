@@ -21,6 +21,7 @@
 <tr><th>Status</th><td>
   {{if .Device.Excluded}}<span class="badge badge-muted">excluded</span>
   {{else if .Device.DNSRecordSynced}}<span class="badge badge-ok">synced</span>
+  {{else if not .Device.IPAddress}}<span class="badge badge-muted" title="no DNS record until it has an address">no IP</span>
   {{else}}<span class="badge badge-error" title="{{.Device.LastSyncError}}">error</span>{{end}}
 </td></tr>
 </tbody>

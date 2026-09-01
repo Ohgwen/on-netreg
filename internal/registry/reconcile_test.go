@@ -277,6 +277,123 @@ func TestReconcileEstimatesLeaseExpiryForDHCPClient(t *testing.T) {
 	}
 }
 
+func TestReconcileNewClientWithNoIPIsTrackedButNotSynced(t *testing.T) {
+	now := time.Now()
+	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client.IP = ""
+
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+
+	if len(result.Changes) != 0 {
+		t.Fatalf("expected no DNS changes for a client with no IP, got %+v", result.Changes)
+	}
+	if len(result.Devices) != 1 {
+		t.Fatalf("expected the device to still be tracked, got %d", len(result.Devices))
+	}
+	if result.Devices[0].IPAddress != "" || result.Devices[0].DNSRecordSynced {
+		t.Errorf("expected an untracked/unsynced device, got %+v", result.Devices[0])
+	}
+}
+
+func TestReconcileNewClientWithMalformedIPIsNotSynced(t *testing.T) {
+	now := time.Now()
+	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client.IP = "not-an-ip"
+
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+
+	if len(result.Changes) != 0 {
+		t.Fatalf("expected no DNS changes for a client with a malformed IP, got %+v", result.Changes)
+	}
+}
+
+func TestReconcileTakesDownRecordWhenIPBecomesInvalid(t *testing.T) {
+	now := time.Now()
+	existing := []db.Device{{
+		MAC:             "aa:bb:cc:dd:ee:01",
+		Hostname:        "laptop",
+		Zone:            testZone,
+		IPAddress:       "192.168.1.100",
+		DNSRecordSynced: true,
+		LastSeen:        now.Add(-time.Minute),
+	}}
+	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client.IP = ""
+
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+
+	if len(result.Changes) != 1 || result.Changes[0].Kind != ChangeDelete {
+		t.Fatalf("expected 1 delete change, got %+v", result.Changes)
+	}
+	if result.Changes[0].PreviousIPAddress != "192.168.1.100" {
+		t.Errorf("previous IP = %q, want 192.168.1.100", result.Changes[0].PreviousIPAddress)
+	}
+	// The stale IP is cleared, not kept, so the dashboard doesn't show an
+	// address that no longer has a DNS record. (DNSRecordSynced itself is
+	// set afterward by the engine from the apply outcome, not by Reconcile
+	// -- see TestRunOnceTakesDownAndRecreatesRecordAsIPComesAndGoes.)
+	if result.Devices[0].IPAddress != "" {
+		t.Errorf("expected IPAddress to be cleared, got %q", result.Devices[0].IPAddress)
+	}
+}
+
+func TestReconcileDoesNotRedeleteAlreadyUnsyncedDevice(t *testing.T) {
+	now := time.Now()
+	existing := []db.Device{{
+		MAC:             "aa:bb:cc:dd:ee:01",
+		Hostname:        "laptop",
+		Zone:            testZone,
+		IPAddress:       "192.168.1.100",
+		DNSRecordSynced: false,
+		LastSeen:        now.Add(-time.Minute),
+	}}
+	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client.IP = ""
+
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+
+	if len(result.Changes) != 0 {
+		t.Fatalf("expected no changes for an already-unsynced device with no IP, got %+v", result.Changes)
+	}
+}
+
+func TestReconcileRecreatesRecordWhenIPReturnsAfterBeingTakenDown(t *testing.T) {
+	now := time.Now()
+	existing := []db.Device{{
+		MAC:             "aa:bb:cc:dd:ee:01",
+		Hostname:        "laptop",
+		Zone:            testZone,
+		IPAddress:       "192.168.1.100",
+		DNSRecordSynced: false, // record was previously taken down
+		LastSeen:        now.Add(-time.Minute),
+	}}
+	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone))
+
+	if len(result.Changes) != 1 || result.Changes[0].Kind != ChangeCreate {
+		t.Fatalf("expected 1 create change (not update), got %+v", result.Changes)
+	}
+	if result.Changes[0].IPAddress != "192.168.1.100" {
+		t.Errorf("IP = %q, want 192.168.1.100", result.Changes[0].IPAddress)
+	}
+}
+
+func TestHasValidIP(t *testing.T) {
+	cases := map[string]bool{
+		"192.168.1.1": true,
+		"::1":         true,
+		"":            false,
+		"not-an-ip":   false,
+		"999.1.1.1":   false,
+	}
+	for ip, want := range cases {
+		if got := HasValidIP(ip); got != want {
+			t.Errorf("HasValidIP(%q) = %v, want %v", ip, got, want)
+		}
+	}
+}
+
 func TestReconcileNoLeaseExpiryForFixedIPClient(t *testing.T) {
 	now := time.Now()
 	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")

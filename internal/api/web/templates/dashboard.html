@@ -39,6 +39,7 @@
   <td>
     {{if .Excluded}}<span class="badge badge-muted">excluded</span>
     {{else if .DNSRecordSynced}}<span class="badge badge-ok">synced</span>
+    {{else if not .IPAddress}}<span class="badge badge-muted" title="no DNS record until it has an address">no IP</span>
     {{else}}<span class="badge badge-error" title="{{.LastSyncError}}">error</span>{{end}}
   </td>
   <td>
