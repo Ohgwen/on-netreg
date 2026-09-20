@@ -52,6 +52,9 @@ type TechnitiumConfig struct {
 	Zone      string `yaml:"zone"`
 	TTL       int    `yaml:"ttl"`
 	CreatePTR bool   `yaml:"create_ptr"`
+	// VerifyDNSServer, when set, is the DNS server queried to confirm a
+	// written record actually resolves, instead of BaseURL's host.
+	VerifyDNSServer string `yaml:"verify_dns_server"`
 }
 
 type DNSConfig struct {

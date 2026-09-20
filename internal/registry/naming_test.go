@@ -32,7 +32,7 @@ func TestSanitizeLabelTruncatesTo63(t *testing.T) {
 
 func TestResolvePrefersOverride(t *testing.T) {
 	override := "custom-name"
-	client := makeClient("aa:bb:cc:dd:ee:ff", "Some Device", "some-hostname")
+	client := makeClient("10:bb:cc:dd:ee:ff", "Some Device", "some-hostname")
 	got := Resolve(client, &override, "{vendor}-{macsuffix}")
 	if got != "custom-name" {
 		t.Errorf("got %q, want %q", got, "custom-name")
@@ -40,7 +40,7 @@ func TestResolvePrefersOverride(t *testing.T) {
 }
 
 func TestResolvePrefersUniFiNameOverHostname(t *testing.T) {
-	client := makeClient("aa:bb:cc:dd:ee:ff", "Kitchen Speaker", "esp32")
+	client := makeClient("10:bb:cc:dd:ee:ff", "Kitchen Speaker", "esp32")
 	got := Resolve(client, nil, "{vendor}-{macsuffix}")
 	if got != "kitchen-speaker" {
 		t.Errorf("got %q, want %q", got, "kitchen-speaker")
@@ -56,7 +56,7 @@ func TestResolveFallsBackOnGenericName(t *testing.T) {
 }
 
 func TestResolveFallsBackWhenBothBlank(t *testing.T) {
-	client := makeClient("aa:bb:cc:11:22:33", "", "")
+	client := makeClient("10:bb:cc:11:22:33", "", "")
 	got := Resolve(client, nil, "{vendor}-{macsuffix}")
 	if got != "device-2233" {
 		t.Errorf("got %q, want %q", got, "device-2233")
@@ -64,28 +64,28 @@ func TestResolveFallsBackWhenBothBlank(t *testing.T) {
 }
 
 func TestDisambiguate(t *testing.T) {
-	taken := map[string]string{TakenKey("lan.example.com", "laptop"): "aa:bb:cc:dd:ee:01"}
+	taken := map[string]string{TakenKey("lan.example.com", "laptop"): "10:bb:cc:dd:ee:01"}
 
 	// Different MAC claiming the same name gets suffixed.
-	got := Disambiguate("laptop", "aa:bb:cc:dd:ee:02", "lan.example.com", taken)
+	got := Disambiguate("laptop", "10:bb:cc:dd:ee:02", "lan.example.com", taken)
 	if got != "laptop-ee02" {
 		t.Errorf("got %q, want %q", got, "laptop-ee02")
 	}
 
 	// Same MAC re-claiming its own name is unaffected.
-	got = Disambiguate("laptop", "aa:bb:cc:dd:ee:01", "lan.example.com", taken)
+	got = Disambiguate("laptop", "10:bb:cc:dd:ee:01", "lan.example.com", taken)
 	if got != "laptop" {
 		t.Errorf("got %q, want %q", got, "laptop")
 	}
 
 	// An unclaimed name passes through untouched.
-	got = Disambiguate("desktop", "aa:bb:cc:dd:ee:03", "lan.example.com", taken)
+	got = Disambiguate("desktop", "10:bb:cc:dd:ee:03", "lan.example.com", taken)
 	if got != "desktop" {
 		t.Errorf("got %q, want %q", got, "desktop")
 	}
 
 	// The same name is unclaimed in a different zone.
-	got = Disambiguate("laptop", "aa:bb:cc:dd:ee:02", "iot.example.com", taken)
+	got = Disambiguate("laptop", "10:bb:cc:dd:ee:02", "iot.example.com", taken)
 	if got != "laptop" {
 		t.Errorf("got %q, want %q", got, "laptop")
 	}

@@ -21,6 +21,29 @@ type NetworkClient struct {
 	// Online reflects whether the client was present in the active-client
 	// list (/stat/sta) this cycle, as opposed to only /stat/alluser.
 	Online bool
+
+	// Essid is the wireless network (SSID) the client is associated to.
+	// Empty for wired clients.
+	Essid string
+	// RadioProto is the wireless radio protocol/band, e.g. "ng", "na", "6e".
+	// Empty for wired clients.
+	RadioProto string
+	// Signal is the client's RSSI in dBm, as last reported. 0 if unknown
+	// or not applicable (wired clients).
+	Signal int
+	// SwPort is the switch port number a wired client is connected to.
+	// 0 if unknown or not applicable (wireless clients).
+	SwPort int
+	// UptimeSeconds is how long the client has been continuously
+	// connected, as last reported by the controller.
+	UptimeSeconds int
+	// RxBytes/TxBytes are cumulative bytes received/transmitted by the
+	// client for its current session, as last reported.
+	RxBytes int64
+	TxBytes int64
+	// Blocked reflects whether the controller is currently blocking this
+	// client's network access.
+	Blocked bool
 }
 
 // apiClient is the raw shape of one entry from /stat/sta or /stat/alluser.
@@ -37,6 +60,14 @@ type apiClient struct {
 	NetworkID  string `json:"network_id"`
 	Network    string `json:"network"`
 	VLAN       int    `json:"vlan"`
+	Essid      string `json:"essid"`
+	RadioProto string `json:"radio_proto"`
+	Signal     int    `json:"signal"`
+	SwPort     int    `json:"sw_port"`
+	Uptime     int    `json:"uptime"`
+	RxBytes    int64  `json:"rx_bytes"`
+	TxBytes    int64  `json:"tx_bytes"`
+	Blocked    bool   `json:"blocked"`
 }
 
 // Network is a normalized view of a network/VLAN configured on a UniFi

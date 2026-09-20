@@ -62,6 +62,10 @@ type TechnitiumSettings struct {
 	PasswordEncrypted string
 	TTL               int
 	CreatePTR         bool
+	// VerifyDNSServer, when set, is the host (or host:port) queried for the
+	// post-write "does this actually resolve" check instead of the
+	// Technitium server itself (derived from BaseURL).
+	VerifyDNSServer string
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

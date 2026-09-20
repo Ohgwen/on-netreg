@@ -23,7 +23,7 @@ func fixedZone(zone string) ZoneResolver {
 
 func TestReconcileCreatesNewDevice(t *testing.T) {
 	now := time.Now()
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 
 	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
@@ -50,14 +50,14 @@ func TestReconcileCreatesNewDevice(t *testing.T) {
 func TestReconcileNoChangeWhenNothingChanged(t *testing.T) {
 	now := time.Now()
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            testZone,
 		IPAddress:       "192.168.1.100",
 		DNSRecordSynced: true,
 		LastSeen:        now.Add(-time.Minute),
 	}}
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 
 	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
@@ -69,17 +69,54 @@ func TestReconcileNoChangeWhenNothingChanged(t *testing.T) {
 	}
 }
 
+// A device already registered under one controller (e.g. it roamed to
+// another site, or the controller config was re-added) must be reassigned
+// in place when a different controller now reports it -- not treated as a
+// brand-new device. devices.mac is globally unique, so the caller is
+// expected to have looked the row up across controllers and passed it in
+// existing; Reconcile's job is to update it (preserving its ID) rather than
+// emit a second device with the same MAC, which would collide on insert.
+func TestReconcileReassignsDeviceSeenUnderDifferentController(t *testing.T) {
+	now := time.Now()
+	existing := []db.Device{{
+		ID:              7,
+		MAC:             "10:bb:cc:dd:ee:01",
+		Hostname:        "laptop",
+		Zone:            testZone,
+		ControllerID:    1,
+		IPAddress:       "192.168.1.100",
+		DNSRecordSynced: true,
+		LastSeen:        now.Add(-time.Minute),
+	}}
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
+
+	result := Reconcile(now, 2, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
+
+	if len(result.Devices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(result.Devices))
+	}
+	if result.Devices[0].ID != 7 {
+		t.Errorf("expected existing row's ID 7 preserved, got %d", result.Devices[0].ID)
+	}
+	if result.Devices[0].ControllerID != 2 {
+		t.Errorf("controllerID = %d, want 2 (reassigned)", result.Devices[0].ControllerID)
+	}
+	if len(result.Changes) != 0 {
+		t.Errorf("expected no DNS changes (nothing else changed), got %+v", result.Changes)
+	}
+}
+
 func TestReconcileUpdatesOnIPChange(t *testing.T) {
 	now := time.Now()
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            testZone,
 		IPAddress:       "192.168.1.50",
 		DNSRecordSynced: true,
 		LastSeen:        now.Add(-time.Minute),
 	}}
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 
 	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
@@ -97,14 +134,14 @@ func TestReconcileUpdatesOnIPChange(t *testing.T) {
 func TestReconcileZoneChangeEmitsDeleteAndCreate(t *testing.T) {
 	now := time.Now()
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            "old.example.com",
 		IPAddress:       "192.168.1.100",
 		DNSRecordSynced: true,
 		LastSeen:        now.Add(-time.Minute),
 	}}
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 
 	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone("new.example.com"), nil)
 
@@ -122,13 +159,13 @@ func TestReconcileZoneChangeEmitsDeleteAndCreate(t *testing.T) {
 func TestReconcileExcludedDeviceNeverSynced(t *testing.T) {
 	now := time.Now()
 	existing := []db.Device{{
-		MAC:      "aa:bb:cc:dd:ee:01",
+		MAC:      "10:bb:cc:dd:ee:01",
 		Hostname: "laptop",
 		Zone:     testZone,
 		Excluded: true,
 		LastSeen: now.Add(-time.Minute),
 	}}
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 
 	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
@@ -144,7 +181,7 @@ func TestReconcileOverrideHostnameWins(t *testing.T) {
 	now := time.Now()
 	override := "my-custom-name"
 	existing := []db.Device{{
-		MAC:              "aa:bb:cc:dd:ee:01",
+		MAC:              "10:bb:cc:dd:ee:01",
 		Hostname:         "laptop",
 		Zone:             testZone,
 		OverrideHostname: &override,
@@ -152,7 +189,7 @@ func TestReconcileOverrideHostnameWins(t *testing.T) {
 		DNSRecordSynced:  true,
 		LastSeen:         now.Add(-time.Minute),
 	}}
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 
 	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
@@ -164,8 +201,8 @@ func TestReconcileOverrideHostnameWins(t *testing.T) {
 func TestReconcileCollisionGetsDisambiguated(t *testing.T) {
 	now := time.Now()
 	clients := []unifi.NetworkClient{
-		makeClient("aa:bb:cc:dd:ee:01", "Laptop", ""),
-		makeClient("aa:bb:cc:dd:ee:02", "Laptop", ""),
+		makeClient("10:bb:cc:dd:ee:01", "Laptop", ""),
+		makeClient("10:bb:cc:dd:ee:02", "Laptop", ""),
 	}
 
 	result := Reconcile(now, 1, nil, clients, testDNSConfig, fixedZone(testZone), nil)
@@ -185,12 +222,12 @@ func TestReconcileCollisionGetsDisambiguated(t *testing.T) {
 func TestReconcileSameNameDifferentZonesNotDisambiguated(t *testing.T) {
 	now := time.Now()
 	clients := []unifi.NetworkClient{
-		makeClient("aa:bb:cc:dd:ee:01", "Laptop", ""),
-		makeClient("aa:bb:cc:dd:ee:02", "Laptop", ""),
+		makeClient("10:bb:cc:dd:ee:01", "Laptop", ""),
+		makeClient("10:bb:cc:dd:ee:02", "Laptop", ""),
 	}
 	zones := map[string]string{
-		"aa:bb:cc:dd:ee:01": "lan.example.com",
-		"aa:bb:cc:dd:ee:02": "iot.example.com",
+		"10:bb:cc:dd:ee:01": "lan.example.com",
+		"10:bb:cc:dd:ee:02": "iot.example.com",
 	}
 	resolver := func(c unifi.NetworkClient) NetworkInfo {
 		return NetworkInfo{Zone: zones[c.MAC]}
@@ -208,7 +245,7 @@ func TestReconcileSameNameDifferentZonesNotDisambiguated(t *testing.T) {
 func TestReconcileDoesNotRemoveByDefaultWhenAbsent(t *testing.T) {
 	now := time.Now()
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            testZone,
 		DNSRecordSynced: true,
@@ -226,7 +263,7 @@ func TestReconcileRemovesAfterConfiguredAbsence(t *testing.T) {
 	now := time.Now()
 	cfg := config.DNSConfig{FallbackPattern: "{vendor}-{macsuffix}", RemoveAfterAbsenceDays: 7}
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            testZone,
 		DNSRecordSynced: true,
@@ -244,7 +281,7 @@ func TestReconcileDoesNotRemoveBeforeAbsenceThreshold(t *testing.T) {
 	now := time.Now()
 	cfg := config.DNSConfig{FallbackPattern: "{vendor}-{macsuffix}", RemoveAfterAbsenceDays: 7}
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            testZone,
 		DNSRecordSynced: true,
@@ -260,7 +297,7 @@ func TestReconcileDoesNotRemoveBeforeAbsenceThreshold(t *testing.T) {
 
 func TestReconcileEstimatesLeaseExpiryForDHCPClient(t *testing.T) {
 	now := time.Now()
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 	resolver := func(unifi.NetworkClient) NetworkInfo {
 		return NetworkInfo{Zone: testZone, LeaseSeconds: 3600}
 	}
@@ -279,7 +316,7 @@ func TestReconcileEstimatesLeaseExpiryForDHCPClient(t *testing.T) {
 
 func TestReconcileNewClientWithNoIPIsTrackedButNotSynced(t *testing.T) {
 	now := time.Now()
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 	client.IP = ""
 
 	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
@@ -297,7 +334,7 @@ func TestReconcileNewClientWithNoIPIsTrackedButNotSynced(t *testing.T) {
 
 func TestReconcileNewClientWithMalformedIPIsNotSynced(t *testing.T) {
 	now := time.Now()
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 	client.IP = "not-an-ip"
 
 	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
@@ -310,14 +347,14 @@ func TestReconcileNewClientWithMalformedIPIsNotSynced(t *testing.T) {
 func TestReconcileTakesDownRecordWhenIPBecomesInvalid(t *testing.T) {
 	now := time.Now()
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            testZone,
 		IPAddress:       "192.168.1.100",
 		DNSRecordSynced: true,
 		LastSeen:        now.Add(-time.Minute),
 	}}
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 	client.IP = ""
 
 	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
@@ -340,14 +377,14 @@ func TestReconcileTakesDownRecordWhenIPBecomesInvalid(t *testing.T) {
 func TestReconcileDoesNotRedeleteAlreadyUnsyncedDevice(t *testing.T) {
 	now := time.Now()
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            testZone,
 		IPAddress:       "192.168.1.100",
 		DNSRecordSynced: false,
 		LastSeen:        now.Add(-time.Minute),
 	}}
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 	client.IP = ""
 
 	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
@@ -360,14 +397,14 @@ func TestReconcileDoesNotRedeleteAlreadyUnsyncedDevice(t *testing.T) {
 func TestReconcileRecreatesRecordWhenIPReturnsAfterBeingTakenDown(t *testing.T) {
 	now := time.Now()
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            testZone,
 		IPAddress:       "192.168.1.100",
 		DNSRecordSynced: false, // record was previously taken down
 		LastSeen:        now.Add(-time.Minute),
 	}}
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 
 	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
 
@@ -397,15 +434,15 @@ func TestHasValidIP(t *testing.T) {
 func TestReconcileSkipDNSSuppressesRecordForExistingDevice(t *testing.T) {
 	now := time.Now()
 	existing := []db.Device{{
-		MAC:             "aa:bb:cc:dd:ee:01",
+		MAC:             "10:bb:cc:dd:ee:01",
 		Hostname:        "laptop",
 		Zone:            testZone,
 		IPAddress:       "192.168.1.50",
 		DNSRecordSynced: true,
 		LastSeen:        now.Add(-time.Minute),
 	}}
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
-	skip := map[string]bool{"aa:bb:cc:dd:ee:01": true}
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
+	skip := map[string]bool{"10:bb:cc:dd:ee:01": true}
 
 	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), skip)
 
@@ -422,8 +459,8 @@ func TestReconcileSkipDNSSuppressesRecordForExistingDevice(t *testing.T) {
 
 func TestReconcileSkipDNSSuppressesRecordForNewDevice(t *testing.T) {
 	now := time.Now()
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
-	skip := map[string]bool{"aa:bb:cc:dd:ee:01": true}
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
+	skip := map[string]bool{"10:bb:cc:dd:ee:01": true}
 
 	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), skip)
 
@@ -437,7 +474,7 @@ func TestReconcileSkipDNSSuppressesRecordForNewDevice(t *testing.T) {
 
 func TestReconcileNoLeaseExpiryForFixedIPClient(t *testing.T) {
 	now := time.Now()
-	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client := makeClient("10:bb:cc:dd:ee:01", "Laptop", "")
 	client.IsFixedIP = true
 	resolver := func(unifi.NetworkClient) NetworkInfo {
 		return NetworkInfo{Zone: testZone, LeaseSeconds: 3600}
@@ -447,5 +484,49 @@ func TestReconcileNoLeaseExpiryForFixedIPClient(t *testing.T) {
 
 	if result.Devices[0].LeaseEstimatedExpiry != nil {
 		t.Errorf("expected no estimated lease expiry for a fixed-IP client")
+	}
+}
+
+func TestReconcileNewDeviceWithPrivateMACIsTrackedButNotSynced(t *testing.T) {
+	now := time.Now()
+	// 0x8a has the U/L bit set: a locally administered / randomized MAC.
+	client := makeClient("8a:bb:cc:dd:ee:01", "Phone", "")
+
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
+
+	if len(result.Changes) != 0 {
+		t.Fatalf("expected no DNS changes for a brand-new private-MAC device, got %+v", result.Changes)
+	}
+	if len(result.Devices) != 1 {
+		t.Fatalf("expected 1 tracked device, got %d", len(result.Devices))
+	}
+	dev := result.Devices[0]
+	if !dev.Excluded {
+		t.Errorf("expected a new private-MAC device to start excluded from DNS sync")
+	}
+	if dev.IPAddress != "192.168.1.100" {
+		t.Errorf("expected the device to still be tracked with its IP, got %q", dev.IPAddress)
+	}
+}
+
+func TestReconcileExistingPrivateMACDeviceKeepsSyncingOnceIncluded(t *testing.T) {
+	now := time.Now()
+	existing := []db.Device{{
+		MAC:             "8a:bb:cc:dd:ee:01",
+		Hostname:        "phone",
+		Zone:            testZone,
+		IPAddress:       "192.168.1.50",
+		DNSRecordSynced: true,
+		Excluded:        false,
+		FirstSeen:       now.Add(-time.Hour),
+		LastSeen:        now.Add(-time.Hour),
+	}}
+	client := makeClient("8a:bb:cc:dd:ee:01", "Phone", "")
+	client.IP = "192.168.1.51"
+
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
+
+	if len(result.Changes) != 1 || result.Changes[0].Kind != ChangeUpdate {
+		t.Fatalf("expected an already-included private-MAC device to keep syncing normally, got %+v", result.Changes)
 	}
 }

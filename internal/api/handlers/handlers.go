@@ -6,16 +6,19 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
 
 	"github.com/Ohgwen/on-netreg/internal/db"
+	"github.com/Ohgwen/on-netreg/internal/macaddr"
 	"github.com/Ohgwen/on-netreg/internal/technitium"
 )
 
@@ -25,6 +28,19 @@ import (
 type deviceView struct {
 	db.Device
 	IdentityName string
+	// PrivateMAC reports whether this device's MAC address is locally
+	// administered (a randomized "private" address), computed fresh from
+	// the MAC on every render so it applies to devices tracked before this
+	// check existed too, not just newly-created ones.
+	PrivateMAC bool
+}
+
+func newDeviceView(d db.Device, identityName string) deviceView {
+	return deviceView{
+		Device:       d,
+		IdentityName: identityName,
+		PrivateMAC:   macaddr.IsPrivate(d.MAC),
+	}
 }
 
 // Engine is the subset of sync.Engine the handlers depend on.
@@ -66,6 +82,17 @@ type pageData struct {
 	// device.html
 	Device deviceView
 
+	// dashboard.html filters
+	Search            string
+	FilterNetwork     string
+	FilterZone        string
+	FilterCreatedFrom string
+	FilterCreatedTo   string
+	FilterSeenFrom    string
+	FilterSeenTo      string
+	Networks          []string
+	DeviceZones       []string
+
 	// events.html filters
 	Actors      []string
 	FilterMAC   string
@@ -94,6 +121,7 @@ func (h *Handlers) Routes() http.Handler {
 	mux.HandleFunc("POST /devices/{id}/override", h.setOverride)
 	mux.HandleFunc("POST /devices/{id}/exclude", h.toggleExclude)
 	mux.HandleFunc("POST /devices/{id}/forget", h.forgetDevice)
+	mux.HandleFunc("POST /devices/bulk", h.bulkAction)
 	return mux
 }
 
@@ -134,9 +162,46 @@ func writeAuditEvent(gdb *gorm.DB, logger *slog.Logger, mac, actor string, actio
 	}
 }
 
+// dateFilterLayout is the format of the dashboard's date-range filter
+// inputs (HTML <input type="date"> values), and of the day-precision dates
+// echoed back into them.
+const dateFilterLayout = "2006-01-02"
+
 func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
+	search := strings.TrimSpace(r.URL.Query().Get("q"))
+	networkFilter := r.URL.Query().Get("network")
+	zoneFilter := r.URL.Query().Get("zone")
+	createdFrom := r.URL.Query().Get("created_from")
+	createdTo := r.URL.Query().Get("created_to")
+	seenFrom := r.URL.Query().Get("seen_from")
+	seenTo := r.URL.Query().Get("seen_to")
+
+	query := h.DB.Order("hostname")
+	if search != "" {
+		like := "%" + search + "%"
+		query = query.Where("hostname LIKE ? OR mac LIKE ? OR ip_address LIKE ? OR uni_fi_name LIKE ?", like, like, like, like)
+	}
+	if networkFilter != "" {
+		query = query.Where("uni_fi_network_name = ?", networkFilter)
+	}
+	if zoneFilter != "" {
+		query = query.Where("zone = ?", zoneFilter)
+	}
+	if t, ok := parseFilterDate(createdFrom); ok {
+		query = query.Where("created_at >= ?", t)
+	}
+	if t, ok := parseFilterDate(createdTo); ok {
+		query = query.Where("created_at < ?", t.AddDate(0, 0, 1))
+	}
+	if t, ok := parseFilterDate(seenFrom); ok {
+		query = query.Where("last_seen >= ?", t)
+	}
+	if t, ok := parseFilterDate(seenTo); ok {
+		query = query.Where("last_seen < ?", t.AddDate(0, 0, 1))
+	}
+
 	var devices []db.Device
-	if err := h.DB.Order("hostname").Find(&devices).Error; err != nil {
+	if err := query.Find(&devices).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -147,17 +212,51 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 	}
 	views := make([]deviceView, 0, len(devices))
 	for _, d := range devices {
-		view := deviceView{Device: d}
+		var identityName string
 		if d.IdentityID != nil {
-			view.IdentityName = names[*d.IdentityID]
+			identityName = names[*d.IdentityID]
 		}
-		views = append(views, view)
+		views = append(views, newDeviceView(d, identityName))
 	}
+
+	var networks []string
+	if err := h.DB.Model(&db.Device{}).Where("uni_fi_network_name <> ''").Distinct().Order("uni_fi_network_name").Pluck("uni_fi_network_name", &networks).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var zones []string
+	if err := h.DB.Model(&db.Device{}).Where("zone <> ''").Distinct().Order("zone").Pluck("zone", &zones).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	h.render(w, r, "dashboard", pageData{
-		Title:   "Devices",
-		Devices: views,
-		Flash:   r.URL.Query().Get("flash"),
+		Title:             "Devices",
+		Devices:           views,
+		Flash:             r.URL.Query().Get("flash"),
+		Search:            search,
+		FilterNetwork:     networkFilter,
+		FilterZone:        zoneFilter,
+		FilterCreatedFrom: createdFrom,
+		FilterCreatedTo:   createdTo,
+		FilterSeenFrom:    seenFrom,
+		FilterSeenTo:      seenTo,
+		Networks:          networks,
+		DeviceZones:       zones,
 	})
+}
+
+// parseFilterDate parses a dashboard date-range filter value, ignoring
+// blank/malformed input rather than erroring the whole page.
+func parseFilterDate(v string) (time.Time, bool) {
+	if v == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(dateFilterLayout, v)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
 }
 
 // identityNames looks up the Identity name for every non-nil IdentityID
@@ -195,13 +294,14 @@ func (h *Handlers) deviceDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	view := deviceView{Device: dev}
+	var identityName string
 	if dev.IdentityID != nil {
 		var ident db.Identity
 		if err := h.DB.First(&ident, *dev.IdentityID).Error; err == nil {
-			view.IdentityName = ident.Name
+			identityName = ident.Name
 		}
 	}
+	view := newDeviceView(dev, identityName)
 	h.render(w, r, "device", pageData{
 		Title:  dev.EffectiveHostname(),
 		Device: view,
@@ -306,17 +406,69 @@ func (h *Handlers) toggleExclude(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	dev.Excluded = !dev.Excluded
-	if err := h.DB.Save(&dev).Error; err != nil {
+	if err := h.setExcluded(r, dev, !dev.Excluded); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// setExcluded updates a device's Excluded flag and records the audit event.
+func (h *Handlers) setExcluded(r *http.Request, dev db.Device, excluded bool) error {
+	dev.Excluded = excluded
+	if err := h.DB.Save(&dev).Error; err != nil {
+		return err
+	}
 	action, detail := db.SyncEventExclude, "excluded from DNS sync"
-	if !dev.Excluded {
+	if !excluded {
 		action, detail = db.SyncEventInclude, "re-included in DNS sync"
 	}
 	h.logAudit(r, dev.MAC, action, detail, true)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	return nil
+}
+
+// bulkAction applies one action (include/exclude/forget) to every device ID
+// posted from the dashboard's bulk-select checkboxes.
+func (h *Handlers) bulkAction(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	action := r.FormValue("action")
+	ids := r.Form["ids"]
+	if len(ids) == 0 {
+		http.Redirect(w, r, "/?flash="+url.QueryEscape("No devices selected."), http.StatusSeeOther)
+		return
+	}
+
+	count := 0
+	for _, idStr := range ids {
+		id, err := strconv.ParseUint(idStr, 10, 64)
+		if err != nil {
+			continue
+		}
+		var dev db.Device
+		if err := h.DB.First(&dev, uint(id)).Error; err != nil {
+			continue
+		}
+		switch action {
+		case "include":
+			if err := h.setExcluded(r, dev, false); err == nil {
+				count++
+			}
+		case "exclude":
+			if err := h.setExcluded(r, dev, true); err == nil {
+				count++
+			}
+		case "forget":
+			if err := h.forgetOne(r, dev); err == nil {
+				count++
+			}
+		}
+	}
+
+	flash := fmt.Sprintf("Bulk %s applied to %d device(s).", action, count)
+	http.Redirect(w, r, "/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
 }
 
 // forgetDevice removes a device from the registry entirely and, if it had a
@@ -327,7 +479,17 @@ func (h *Handlers) forgetDevice(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := h.forgetOne(r, dev); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
 
+// forgetOne removes a device from the registry entirely and, if it had a
+// synced DNS record, deletes that record immediately rather than waiting on
+// the sync engine's absence-based cleanup.
+func (h *Handlers) forgetOne(r *http.Request, dev db.Device) error {
 	if dev.DNSRecordSynced && !dev.Excluded && dev.Zone != "" {
 		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 		defer cancel()
@@ -348,9 +510,8 @@ func (h *Handlers) forgetDevice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.DB.Delete(&dev).Error; err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return err
 	}
 	h.logAudit(r, dev.MAC, db.SyncEventForget, "forgot device "+dev.EffectiveHostname(), true)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	return nil
 }

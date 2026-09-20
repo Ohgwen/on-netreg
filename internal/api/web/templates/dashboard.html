@@ -6,29 +6,76 @@
   </form>
 </div>
 {{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
+<form method="get" action="/" class="filter-form">
+  <label class="visually-hidden" for="search">Search devices</label>
+  <input type="text" id="search" name="q" placeholder="Search hostname, MAC, IP..." value="{{.Search}}">
+  <label class="visually-hidden" for="filter-network">Filter by network</label>
+  <select id="filter-network" name="network">
+    <option value="">All networks</option>
+    {{$selectedNetwork := .FilterNetwork}}
+    {{range .Networks}}
+    <option value="{{.}}" {{if eq . $selectedNetwork}}selected{{end}}>{{.}}</option>
+    {{end}}
+  </select>
+  <label class="visually-hidden" for="filter-zone">Filter by zone</label>
+  <select id="filter-zone" name="zone">
+    <option value="">All zones</option>
+    {{$selectedZone := .FilterZone}}
+    {{range .DeviceZones}}
+    <option value="{{.}}" {{if eq . $selectedZone}}selected{{end}}>{{.}}</option>
+    {{end}}
+  </select>
+  <details class="more-filters">
+    <summary>&#9656; more filters</summary>
+    <div class="more-filters-body">
+      <label class="visually-hidden" for="created-from">Created from</label>
+      <input type="date" id="created-from" name="created_from" title="Created from" value="{{.FilterCreatedFrom}}">
+      <label class="visually-hidden" for="created-to">Created to</label>
+      <input type="date" id="created-to" name="created_to" title="Created to" value="{{.FilterCreatedTo}}">
+      <label class="visually-hidden" for="seen-from">Last seen from</label>
+      <input type="date" id="seen-from" name="seen_from" title="Last seen from" value="{{.FilterSeenFrom}}">
+      <label class="visually-hidden" for="seen-to">Last seen to</label>
+      <input type="date" id="seen-to" name="seen_to" title="Last seen to" value="{{.FilterSeenTo}}">
+    </div>
+  </details>
+  <button type="submit">Filter</button>
+  {{if or .Search .FilterNetwork .FilterZone .FilterCreatedFrom .FilterCreatedTo .FilterSeenFrom .FilterSeenTo}}<a href="/">Clear</a>{{end}}
+</form>
+
+<form method="post" action="/devices/bulk" id="bulk-form">
+<div class="datatable" data-datatable data-storage-key="devices">
 <div class="table-wrap">
-<table class="devices">
+<table class="devices" id="devices-table">
 <thead>
 <tr>
-  <th>Hostname</th>
-  <th>Network</th>
-  <th>Zone</th>
-  <th>Lease</th>
-  <th>MAC</th>
-  <th>IP</th>
-  <th>Last seen</th>
-  <th>Synced</th>
-  <th>Override</th>
-  <th></th>
-  <th></th>
+  <th class="no-sort no-export col-check"><input type="checkbox" id="select-all" aria-label="Select all devices"></th>
+  <th data-key="hostname">Hostname</th>
+  <th data-key="network">Network</th>
+  <th data-key="zone">Zone</th>
+  <th data-key="conn" data-default-hidden="1" data-sort-type="text">Connection</th>
+  <th data-key="lease" class="no-sort">Lease</th>
+  <th data-key="mac">MAC</th>
+  <th data-key="ip" data-sort-type="ip">IP</th>
+  <th data-key="lastseen" data-sort-type="date">Last seen</th>
+  <th data-key="synced" class="no-sort">Synced</th>
+  <th data-key="override" class="no-sort no-export">Override</th>
+  <th class="no-sort no-export"></th>
+  <th class="no-sort no-export"></th>
 </tr>
 </thead>
 <tbody>
 {{range .Devices}}
 <tr class="{{if .Excluded}}excluded{{end}}{{if not .DNSRecordSynced}} unsynced{{end}}">
+  <td class="col-check"><input type="checkbox" class="row-select" name="ids" value="{{.ID}}" aria-label="Select {{.EffectiveHostname}}"></td>
   <td><a href="/devices/{{.ID}}">{{.EffectiveHostname}}</a></td>
   <td>{{.UniFiNetworkName}}</td>
   <td class="mono">{{.Zone}}</td>
+  <td>
+    {{if .Essid}}<span title="Wi-Fi: {{.Essid}} ({{.RadioProto}}){{if .Signal}}, {{.Signal}} dBm{{end}}">{{.Essid}}{{if .Signal}} · {{.Signal}} dBm{{end}}</span>
+    {{else if .SwPort}}<span title="Wired, switch port {{.SwPort}}">port {{.SwPort}}</span>
+    {{else}}<span class="badge badge-muted">&mdash;</span>{{end}}
+    {{if .Blocked}}<span class="badge badge-error" title="Blocked by UniFi controller">blocked</span>{{end}}
+  </td>
   <td>
     {{if .IsFixedIP}}<span class="badge badge-muted">static</span>
     {{else if .LeaseEstimatedExpiry}}<span class="badge badge-muted" title="estimated from last seen + the network's configured DHCP lease time">DHCP · est. {{datetimePtr .LeaseEstimatedExpiry}}</span>
@@ -43,6 +90,7 @@
     {{else if .DNSRecordSynced}}<span class="badge badge-ok">synced</span>
     {{else if not .IPAddress}}<span class="badge badge-muted" title="no DNS record until it has an address">no IP</span>
     {{else}}<span class="badge badge-error" title="{{.LastSyncError}}">error</span>{{end}}
+    {{if .PrivateMAC}}<span class="badge badge-warn" title="Locally administered (randomized/private) MAC address -- not synced automatically since it's typically reassigned on every reconnect. Click Include to sync anyway.">private MAC</span>{{end}}
   </td>
   <td>
     <form method="post" action="/devices/{{.ID}}/override" class="inline">
@@ -63,9 +111,18 @@
   </td>
 </tr>
 {{else}}
-<tr><td colspan="11" class="empty">No devices yet. Try "Sync now" or wait for the next poll.</td></tr>
+<tr><td colspan="13" class="empty">No devices yet. Try "Sync now" or wait for the next poll.</td></tr>
 {{end}}
 </tbody>
 </table>
 </div>
+</div>
+<div class="bulk-bar" id="bulk-bar" hidden>
+  <span id="bulk-count"></span>
+  <button type="submit" name="action" value="include">Include</button>
+  <button type="submit" name="action" value="exclude">Exclude</button>
+  <button type="submit" class="danger" name="action" value="forget" onclick="return confirm('Forget all selected devices and remove their DNS records?');">Forget</button>
+</div>
+</form>
+<script src="/static/tables.js"></script>
 {{end}}

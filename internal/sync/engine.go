@@ -173,14 +173,29 @@ func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRun
 		return fmt.Errorf("creating unifi client: %w", err)
 	}
 
-	var existing []db.Device
-	if err := e.DB.Where("controller_id = ?", ctrl.ID).Find(&existing).Error; err != nil {
-		return fmt.Errorf("loading existing devices: %w", err)
-	}
-
 	seen, err := unifiClient.FetchClients(ctx)
 	if err != nil {
 		return fmt.Errorf("fetching clients: %w", err)
+	}
+
+	seenMACs := make([]string, len(seen))
+	for i, c := range seen {
+		seenMACs[i] = c.MAC
+	}
+
+	// devices.mac is globally unique, not unique per controller. A MAC seen
+	// here may already be registered under a different controller (it
+	// roamed, the client was re-added to another site, etc.) -- load those
+	// rows too, in addition to this controller's own, so Reconcile treats
+	// them as an existing device to reassign rather than a new one to
+	// insert, which would collide with the global unique index.
+	var existing []db.Device
+	q := e.DB.Where("controller_id = ?", ctrl.ID)
+	if len(seenMACs) > 0 {
+		q = q.Or("mac IN ?", seenMACs)
+	}
+	if err := q.Find(&existing).Error; err != nil {
+		return fmt.Errorf("loading existing devices: %w", err)
 	}
 
 	defaultZone := ctrl.DefaultZone

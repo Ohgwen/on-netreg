@@ -4,6 +4,7 @@ package web
 
 import (
 	"embed"
+	"fmt"
 	"html/template"
 	"io/fs"
 	"time"
@@ -27,6 +28,38 @@ var funcMap = template.FuncMap{
 			return ""
 		}
 		return t.Local().Format("2006-01-02 15:04:05")
+	},
+	"formatDuration": func(seconds int) string {
+		if seconds <= 0 {
+			return ""
+		}
+		d := time.Duration(seconds) * time.Second
+		days := int(d.Hours()) / 24
+		hours := int(d.Hours()) % 24
+		mins := int(d.Minutes()) % 60
+		switch {
+		case days > 0:
+			return fmt.Sprintf("%dd %dh", days, hours)
+		case hours > 0:
+			return fmt.Sprintf("%dh %dm", hours, mins)
+		default:
+			return fmt.Sprintf("%dm", mins)
+		}
+	},
+	"formatBytes": func(n int64) string {
+		if n <= 0 {
+			return "0 B"
+		}
+		const unit = 1024
+		if n < unit {
+			return fmt.Sprintf("%d B", n)
+		}
+		div, exp := int64(unit), 0
+		for m := n / unit; m >= unit; m /= unit {
+			div *= unit
+			exp++
+		}
+		return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 	},
 }
 

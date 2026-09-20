@@ -24,6 +24,10 @@
     <input type="text" name="ttl" value="{{.TechSettings.TTL}}" inputmode="numeric" pattern="[0-9]*">
   </label>
   <label class="checkbox"><input type="checkbox" name="create_ptr" {{if .TechSettings.CreatePTR}}checked{{end}}> Create PTR records</label>
+  <label>Verification DNS server
+    <input type="text" name="verify_dns_server" value="{{.TechSettings.VerifyDNSServer}}" placeholder="(default: Technitium server itself)" autocomplete="off">
+  </label>
+  <p class="hint">DNS server queried to confirm a written record actually resolves. Leave blank to query the Technitium server itself.</p>
 
   <div class="actions">
     <button type="submit">Save</button>

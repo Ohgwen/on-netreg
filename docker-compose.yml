@@ -3,7 +3,7 @@ services:
     build: .
     # image: ghcr.io/ohgwen/on-netreg:latest
     ports:
-      - "8080:8080"
+      - "8085:8080"
     volumes:
       - netreg-data:/data
       - ./config:/etc/netreg/

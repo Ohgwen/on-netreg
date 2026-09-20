@@ -4,7 +4,7 @@
   <a href="/">&larr; Back to devices</a>
 </div>
 
-<div class="table-wrap">
+<div class="card">
 <table class="detail">
 <tbody>
 <tr><th>MAC</th><td class="mono">{{.Device.MAC}}</td></tr>
@@ -25,12 +25,33 @@
   {{else if .Device.DNSRecordSynced}}<span class="badge badge-ok">synced</span>
   {{else if not .Device.IPAddress}}<span class="badge badge-muted" title="no DNS record until it has an address">no IP</span>
   {{else}}<span class="badge badge-error" title="{{.Device.LastSyncError}}">error</span>{{end}}
+  {{if .Device.PrivateMAC}}<span class="badge badge-warn" title="Locally administered (randomized/private) MAC address -- not synced automatically since it's typically reassigned on every reconnect.">private MAC</span>{{end}}
 </td></tr>
 </tbody>
 </table>
 </div>
 
-<h1>History</h1>
+<div class="section-head"><h2>Connection</h2></div>
+<div class="card">
+<table class="detail">
+<tbody>
+<tr><th>Access</th><td>
+  {{if .Device.Blocked}}<span class="badge badge-error">blocked by controller</span>{{else}}<span class="badge badge-ok">allowed</span>{{end}}
+</td></tr>
+{{if .Device.Essid}}
+<tr><th>SSID</th><td>{{.Device.Essid}}</td></tr>
+<tr><th>Radio</th><td>{{.Device.RadioProto}}</td></tr>
+<tr><th>Signal</th><td>{{if .Device.Signal}}{{.Device.Signal}} dBm{{end}}</td></tr>
+{{else}}
+<tr><th>Switch port</th><td>{{if .Device.SwPort}}{{.Device.SwPort}}{{end}}</td></tr>
+{{end}}
+<tr><th>Uptime</th><td>{{if .Device.UptimeSeconds}}{{formatDuration .Device.UptimeSeconds}}{{end}}</td></tr>
+<tr><th>Data usage</th><td>{{formatBytes .Device.RxBytes}} down / {{formatBytes .Device.TxBytes}} up</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="section-head"><h2>History</h2></div>
 <div class="table-wrap">
 <table class="events">
 <thead>

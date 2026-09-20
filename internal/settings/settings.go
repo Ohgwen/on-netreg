@@ -156,11 +156,12 @@ func LoadTechnitium(gdb *gorm.DB, key []byte) (config.TechnitiumConfig, error) {
 		return config.TechnitiumConfig{}, fmt.Errorf("decrypting technitium password: %w", err)
 	}
 	return config.TechnitiumConfig{
-		BaseURL:   row.BaseURL,
-		Username:  row.Username,
-		Password:  password,
-		TTL:       row.TTL,
-		CreatePTR: row.CreatePTR,
+		BaseURL:         row.BaseURL,
+		Username:        row.Username,
+		Password:        password,
+		TTL:             row.TTL,
+		CreatePTR:       row.CreatePTR,
+		VerifyDNSServer: row.VerifyDNSServer,
 	}, nil
 }
 
@@ -294,10 +295,11 @@ func SeedFromConfig(gdb *gorm.DB, key []byte, cfg config.Config) error {
 	}
 	if technitiumCount == 0 && cfg.Technitium.BaseURL != "" {
 		row := db.TechnitiumSettings{
-			BaseURL:   cfg.Technitium.BaseURL,
-			Username:  cfg.Technitium.Username,
-			TTL:       cfg.Technitium.TTL,
-			CreatePTR: cfg.Technitium.CreatePTR,
+			BaseURL:         cfg.Technitium.BaseURL,
+			Username:        cfg.Technitium.Username,
+			TTL:             cfg.Technitium.TTL,
+			CreatePTR:       cfg.Technitium.CreatePTR,
+			VerifyDNSServer: cfg.Technitium.VerifyDNSServer,
 		}
 		if err := SaveTechnitium(gdb, key, &row, cfg.Technitium.Password); err != nil {
 			return fmt.Errorf("seeding technitium settings from config: %w", err)

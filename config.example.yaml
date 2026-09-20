@@ -25,6 +25,9 @@ technitium:
   zone: lan.example.com
   ttl: 3600
   create_ptr: true
+  # verify_dns_server: 1.1.1.1   # optional: DNS server used to confirm a
+  #                              # written record resolves; defaults to the
+  #                              # Technitium server itself (base_url's host)
 
 dns:
   fallback_pattern: "{vendor}-{macsuffix}"

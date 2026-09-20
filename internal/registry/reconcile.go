@@ -6,6 +6,7 @@ import (
 
 	"github.com/Ohgwen/on-netreg/internal/config"
 	"github.com/Ohgwen/on-netreg/internal/db"
+	"github.com/Ohgwen/on-netreg/internal/macaddr"
 	"github.com/Ohgwen/on-netreg/internal/unifi"
 )
 
@@ -97,11 +98,13 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 
 		if found && (existingDevice.Excluded || skipDNS[client.MAC]) {
 			dev := existingDevice
+			dev.ControllerID = controllerID
 			if hasValidIP {
 				dev.IPAddress = client.IP
 			}
 			dev.UniFiName = uniFiDisplayName(client)
 			dev.UniFiNetworkName = client.Network
+			applyConnectionDetails(&dev, client)
 			dev.NetworkID = info.NetworkID
 			dev.IsFixedIP = client.IsFixedIP
 			dev.LeaseEstimatedExpiry = estimateLeaseExpiry(now, client.IsFixedIP, info.LeaseSeconds)
@@ -118,6 +121,15 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 		taken[TakenKey(zone, hostname)] = client.MAC
 
 		if !found {
+			// A newly-seen client with a locally administered ("private")
+			// MAC address is almost always a randomized address generated
+			// by the device's OS for privacy, reassigned on every
+			// reconnect -- not a stable identity worth publishing to DNS.
+			// Such devices are tracked like any other but start excluded
+			// from sync; an admin can still explicitly include one via the
+			// dashboard if they know it's actually stable.
+			private := macaddr.IsPrivate(client.MAC)
+
 			dev := db.Device{
 				MAC:                  client.MAC,
 				ControllerID:         controllerID,
@@ -130,7 +142,9 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 				LeaseEstimatedExpiry: estimateLeaseExpiry(now, client.IsFixedIP, info.LeaseSeconds),
 				FirstSeen:            now,
 				LastSeen:             now,
+				Excluded:             private,
 			}
+			applyConnectionDetails(&dev, client)
 			// A client with no valid IP yet (still negotiating DHCP, or
 			// disconnected) is tracked for visibility but never gets a DNS
 			// record until it actually has an address. Identity members are
@@ -140,7 +154,7 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 			if hasValidIP {
 				dev.IPAddress = client.IP
 			}
-			if hasValidIP && !skipDNS[client.MAC] {
+			if hasValidIP && !skipDNS[client.MAC] && !private {
 				result.Changes = append(result.Changes, Change{
 					Kind:      ChangeCreate,
 					MAC:       client.MAC,
@@ -154,6 +168,7 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 		}
 
 		dev := existingDevice
+		dev.ControllerID = controllerID
 		hasRecord := dev.DNSRecordSynced
 		zoneChanged := dev.Zone != "" && dev.Zone != zone
 		hostnameChanged := dev.Hostname != hostname
@@ -222,6 +237,7 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 		dev.Zone = zone
 		dev.UniFiName = uniFiDisplayName(client)
 		dev.UniFiNetworkName = client.Network
+		applyConnectionDetails(&dev, client)
 		dev.NetworkID = info.NetworkID
 		dev.IsFixedIP = client.IsFixedIP
 		dev.LeaseEstimatedExpiry = estimateLeaseExpiry(now, client.IsFixedIP, info.LeaseSeconds)
@@ -287,6 +303,21 @@ func estimateLeaseExpiry(now time.Time, isFixedIP bool, leaseSeconds int) *time.
 	}
 	expiry := now.Add(time.Duration(leaseSeconds) * time.Second)
 	return &expiry
+}
+
+// applyConnectionDetails copies the extended, purely-informational UniFi
+// connection fields (signal, radio, port, data usage, etc.) onto dev. These
+// never affect DNS sync decisions, so refreshing them is safe on every
+// branch of Reconcile, including the excluded/skipDNS passthrough.
+func applyConnectionDetails(dev *db.Device, c unifi.NetworkClient) {
+	dev.Essid = c.Essid
+	dev.RadioProto = c.RadioProto
+	dev.Signal = c.Signal
+	dev.SwPort = c.SwPort
+	dev.UptimeSeconds = c.UptimeSeconds
+	dev.RxBytes = c.RxBytes
+	dev.TxBytes = c.TxBytes
+	dev.Blocked = c.Blocked
 }
 
 func uniFiDisplayName(c unifi.NetworkClient) string {

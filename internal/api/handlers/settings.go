@@ -383,10 +383,11 @@ func (h *SettingsHandlers) saveTechnitium(w http.ResponseWriter, r *http.Request
 	}
 	ttl, _ := strconv.Atoi(r.FormValue("ttl"))
 	row := db.TechnitiumSettings{
-		BaseURL:   r.FormValue("base_url"),
-		Username:  r.FormValue("username"),
-		TTL:       ttl,
-		CreatePTR: r.FormValue("create_ptr") == "on",
+		BaseURL:         r.FormValue("base_url"),
+		Username:        r.FormValue("username"),
+		TTL:             ttl,
+		CreatePTR:       r.FormValue("create_ptr") == "on",
+		VerifyDNSServer: r.FormValue("verify_dns_server"),
 	}
 	if err := settings.SaveTechnitium(h.DB, h.SecretKey, &row, r.FormValue("password")); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

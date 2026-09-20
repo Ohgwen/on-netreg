@@ -115,7 +115,7 @@ func TestRunOnceCreatesDeviceAndDNSRecord(t *testing.T) {
 	seedController(t, gdb, "lan.example.com")
 
 	dns := &fakeDNS{}
-	uc := fakeUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
+	uc := fakeUnifi{clients: []unifi.NetworkClient{{MAC: "10:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
 	e := newTestEngine(gdb, dns, uc)
 
 	if err := e.RunOnce(context.Background()); err != nil {
@@ -151,7 +151,7 @@ func TestRunOnceMarksDeviceUnsyncedOnDNSFailure(t *testing.T) {
 	seedController(t, gdb, "lan.example.com")
 
 	dns := &fakeDNS{addErr: errors.New("technitium unreachable")}
-	uc := fakeUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
+	uc := fakeUnifi{clients: []unifi.NetworkClient{{MAC: "10:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
 	e := newTestEngine(gdb, dns, uc)
 
 	if err := e.RunOnce(context.Background()); err != nil {
@@ -190,12 +190,12 @@ func TestRunOnceSkipsExcludedDevice(t *testing.T) {
 	seedTechnitium(t, gdb)
 	ctrl := seedController(t, gdb, "lan.example.com")
 
-	if err := gdb.Create(&db.Device{MAC: "aa:bb:cc:dd:ee:01", ControllerID: ctrl.ID, Hostname: "laptop", Zone: "lan.example.com", Excluded: true}).Error; err != nil {
+	if err := gdb.Create(&db.Device{MAC: "10:bb:cc:dd:ee:01", ControllerID: ctrl.ID, Hostname: "laptop", Zone: "lan.example.com", Excluded: true}).Error; err != nil {
 		t.Fatalf("seeding device: %v", err)
 	}
 
 	dns := &fakeDNS{}
-	uc := fakeUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
+	uc := fakeUnifi{clients: []unifi.NetworkClient{{MAC: "10:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
 	e := newTestEngine(gdb, dns, uc)
 
 	if err := e.RunOnce(context.Background()); err != nil {
@@ -214,7 +214,7 @@ func TestRunOnceTakesDownAndRecreatesRecordAsIPComesAndGoes(t *testing.T) {
 	seedController(t, gdb, "lan.example.com")
 
 	dns := &fakeDNS{}
-	uc := &mutableUnifi{clients: []unifi.NetworkClient{{MAC: "aa:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
+	uc := &mutableUnifi{clients: []unifi.NetworkClient{{MAC: "10:bb:cc:dd:ee:01", Name: "Laptop", IP: "192.168.1.100"}}}
 	e := newTestEngine(gdb, dns, uc)
 
 	// Cycle 1: device has an IP, gets created and marked synced.

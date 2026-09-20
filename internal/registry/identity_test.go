@@ -14,13 +14,13 @@ func onlyAlive(ip string) func(string) bool {
 func TestSelectActivePicksHighestPriorityAliveMember(t *testing.T) {
 	now := time.Now()
 	members := []MemberState{
-		{MAC: "aa:bb:cc:dd:ee:01", IPAddress: "192.168.1.10", LastSeen: now, Priority: 0},
-		{MAC: "aa:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
+		{MAC: "10:bb:cc:dd:ee:01", IPAddress: "192.168.1.10", LastSeen: now, Priority: 0},
+		{MAC: "10:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
 	}
 
 	active, fellBack := SelectActive(now, members, time.Hour, alwaysAlive)
 
-	if active == nil || active.MAC != "aa:bb:cc:dd:ee:01" {
+	if active == nil || active.MAC != "10:bb:cc:dd:ee:01" {
 		t.Fatalf("expected highest-priority member selected, got %+v", active)
 	}
 	if fellBack {
@@ -31,13 +31,13 @@ func TestSelectActivePicksHighestPriorityAliveMember(t *testing.T) {
 func TestSelectActiveFallsThroughToNextPriorityWhenFirstIsDead(t *testing.T) {
 	now := time.Now()
 	members := []MemberState{
-		{MAC: "aa:bb:cc:dd:ee:01", IPAddress: "192.168.1.10", LastSeen: now, Priority: 0},
-		{MAC: "aa:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
+		{MAC: "10:bb:cc:dd:ee:01", IPAddress: "192.168.1.10", LastSeen: now, Priority: 0},
+		{MAC: "10:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
 	}
 
 	active, fellBack := SelectActive(now, members, time.Hour, onlyAlive("192.168.1.20"))
 
-	if active == nil || active.MAC != "aa:bb:cc:dd:ee:02" {
+	if active == nil || active.MAC != "10:bb:cc:dd:ee:02" {
 		t.Fatalf("expected fallback to the alive lower-priority member, got %+v", active)
 	}
 	if fellBack {
@@ -48,13 +48,13 @@ func TestSelectActiveFallsThroughToNextPriorityWhenFirstIsDead(t *testing.T) {
 func TestSelectActiveFallsBackToHighestPriorityWhenNoneAlive(t *testing.T) {
 	now := time.Now()
 	members := []MemberState{
-		{MAC: "aa:bb:cc:dd:ee:01", IPAddress: "192.168.1.10", LastSeen: now, Priority: 0},
-		{MAC: "aa:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
+		{MAC: "10:bb:cc:dd:ee:01", IPAddress: "192.168.1.10", LastSeen: now, Priority: 0},
+		{MAC: "10:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
 	}
 
 	active, fellBack := SelectActive(now, members, time.Hour, neverAlive)
 
-	if active == nil || active.MAC != "aa:bb:cc:dd:ee:01" {
+	if active == nil || active.MAC != "10:bb:cc:dd:ee:01" {
 		t.Fatalf("expected fallback to highest-priority member, got %+v", active)
 	}
 	if !fellBack {
@@ -65,13 +65,13 @@ func TestSelectActiveFallsBackToHighestPriorityWhenNoneAlive(t *testing.T) {
 func TestSelectActiveSkipsStaleMembers(t *testing.T) {
 	now := time.Now()
 	members := []MemberState{
-		{MAC: "aa:bb:cc:dd:ee:01", IPAddress: "192.168.1.10", LastSeen: now.Add(-time.Hour), Priority: 0},
-		{MAC: "aa:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
+		{MAC: "10:bb:cc:dd:ee:01", IPAddress: "192.168.1.10", LastSeen: now.Add(-time.Hour), Priority: 0},
+		{MAC: "10:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
 	}
 
 	active, _ := SelectActive(now, members, time.Minute, alwaysAlive)
 
-	if active == nil || active.MAC != "aa:bb:cc:dd:ee:02" {
+	if active == nil || active.MAC != "10:bb:cc:dd:ee:02" {
 		t.Fatalf("expected the stale member skipped in favor of the fresh one, got %+v", active)
 	}
 }
@@ -79,13 +79,13 @@ func TestSelectActiveSkipsStaleMembers(t *testing.T) {
 func TestSelectActiveSkipsInvalidIPs(t *testing.T) {
 	now := time.Now()
 	members := []MemberState{
-		{MAC: "aa:bb:cc:dd:ee:01", IPAddress: "", LastSeen: now, Priority: 0},
-		{MAC: "aa:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
+		{MAC: "10:bb:cc:dd:ee:01", IPAddress: "", LastSeen: now, Priority: 0},
+		{MAC: "10:bb:cc:dd:ee:02", IPAddress: "192.168.1.20", LastSeen: now, Priority: 1},
 	}
 
 	active, _ := SelectActive(now, members, time.Hour, alwaysAlive)
 
-	if active == nil || active.MAC != "aa:bb:cc:dd:ee:02" {
+	if active == nil || active.MAC != "10:bb:cc:dd:ee:02" {
 		t.Fatalf("expected the member with no valid IP skipped, got %+v", active)
 	}
 }
@@ -93,7 +93,7 @@ func TestSelectActiveSkipsInvalidIPs(t *testing.T) {
 func TestSelectActiveReturnsNilWhenNoCandidates(t *testing.T) {
 	now := time.Now()
 	members := []MemberState{
-		{MAC: "aa:bb:cc:dd:ee:01", IPAddress: "", LastSeen: now, Priority: 0},
+		{MAC: "10:bb:cc:dd:ee:01", IPAddress: "", LastSeen: now, Priority: 0},
 	}
 
 	active, fellBack := SelectActive(now, members, time.Hour, alwaysAlive)

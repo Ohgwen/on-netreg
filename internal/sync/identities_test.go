@@ -15,10 +15,10 @@ func TestRunOnceIdentityPicksHighestPriorityMember(t *testing.T) {
 	ctrl := seedController(t, gdb, "lan.example.com")
 
 	now := time.Now()
-	if err := gdb.Create(&db.Device{MAC: "aa:bb:cc:dd:ee:01", ControllerID: ctrl.ID, IPAddress: "192.168.1.10", LastSeen: now}).Error; err != nil {
+	if err := gdb.Create(&db.Device{MAC: "10:bb:cc:dd:ee:01", ControllerID: ctrl.ID, IPAddress: "192.168.1.10", LastSeen: now}).Error; err != nil {
 		t.Fatalf("seeding device 1: %v", err)
 	}
-	if err := gdb.Create(&db.Device{MAC: "aa:bb:cc:dd:ee:02", ControllerID: ctrl.ID, IPAddress: "192.168.1.20", LastSeen: now}).Error; err != nil {
+	if err := gdb.Create(&db.Device{MAC: "10:bb:cc:dd:ee:02", ControllerID: ctrl.ID, IPAddress: "192.168.1.20", LastSeen: now}).Error; err != nil {
 		t.Fatalf("seeding device 2: %v", err)
 	}
 
@@ -26,10 +26,10 @@ func TestRunOnceIdentityPicksHighestPriorityMember(t *testing.T) {
 	if err := gdb.Create(&ident).Error; err != nil {
 		t.Fatalf("seeding identity: %v", err)
 	}
-	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "aa:bb:cc:dd:ee:01", Priority: 0}).Error; err != nil {
+	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "10:bb:cc:dd:ee:01", Priority: 0}).Error; err != nil {
 		t.Fatalf("seeding member 1: %v", err)
 	}
-	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "aa:bb:cc:dd:ee:02", Priority: 1}).Error; err != nil {
+	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "10:bb:cc:dd:ee:02", Priority: 1}).Error; err != nil {
 		t.Fatalf("seeding member 2: %v", err)
 	}
 
@@ -57,7 +57,7 @@ func TestRunOnceIdentityPicksHighestPriorityMember(t *testing.T) {
 	if err := gdb.First(&got, ident.ID).Error; err != nil {
 		t.Fatalf("reloading identity: %v", err)
 	}
-	if !got.DNSRecordSynced || got.ActiveMAC != "aa:bb:cc:dd:ee:01" {
+	if !got.DNSRecordSynced || got.ActiveMAC != "10:bb:cc:dd:ee:01" {
 		t.Errorf("unexpected identity state: %+v", got)
 	}
 	if got.LastVerifiedAt == nil {
@@ -83,10 +83,10 @@ func TestRunOnceIdentityFailsOverWhenPreferredMemberDead(t *testing.T) {
 	ctrl := seedController(t, gdb, "lan.example.com")
 
 	now := time.Now()
-	if err := gdb.Create(&db.Device{MAC: "aa:bb:cc:dd:ee:01", ControllerID: ctrl.ID, IPAddress: "192.168.1.10", LastSeen: now}).Error; err != nil {
+	if err := gdb.Create(&db.Device{MAC: "10:bb:cc:dd:ee:01", ControllerID: ctrl.ID, IPAddress: "192.168.1.10", LastSeen: now}).Error; err != nil {
 		t.Fatalf("seeding device 1: %v", err)
 	}
-	if err := gdb.Create(&db.Device{MAC: "aa:bb:cc:dd:ee:02", ControllerID: ctrl.ID, IPAddress: "192.168.1.20", LastSeen: now}).Error; err != nil {
+	if err := gdb.Create(&db.Device{MAC: "10:bb:cc:dd:ee:02", ControllerID: ctrl.ID, IPAddress: "192.168.1.20", LastSeen: now}).Error; err != nil {
 		t.Fatalf("seeding device 2: %v", err)
 	}
 
@@ -94,10 +94,10 @@ func TestRunOnceIdentityFailsOverWhenPreferredMemberDead(t *testing.T) {
 	if err := gdb.Create(&ident).Error; err != nil {
 		t.Fatalf("seeding identity: %v", err)
 	}
-	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "aa:bb:cc:dd:ee:01", Priority: 0}).Error; err != nil {
+	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "10:bb:cc:dd:ee:01", Priority: 0}).Error; err != nil {
 		t.Fatalf("seeding member 1: %v", err)
 	}
-	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "aa:bb:cc:dd:ee:02", Priority: 1}).Error; err != nil {
+	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "10:bb:cc:dd:ee:02", Priority: 1}).Error; err != nil {
 		t.Fatalf("seeding member 2: %v", err)
 	}
 
@@ -125,14 +125,14 @@ func TestRunOnceIdentityDeletesRecordWhenNoMemberIsFresh(t *testing.T) {
 	ctrl := seedController(t, gdb, "lan.example.com")
 
 	stale := time.Now().Add(-30 * 24 * time.Hour)
-	if err := gdb.Create(&db.Device{MAC: "aa:bb:cc:dd:ee:01", ControllerID: ctrl.ID, IPAddress: "192.168.1.10", LastSeen: stale}).Error; err != nil {
+	if err := gdb.Create(&db.Device{MAC: "10:bb:cc:dd:ee:01", ControllerID: ctrl.ID, IPAddress: "192.168.1.10", LastSeen: stale}).Error; err != nil {
 		t.Fatalf("seeding device: %v", err)
 	}
 
 	ident := db.Identity{
 		Name:            "laptop",
 		Zone:            "roam.example.com",
-		ActiveMAC:       "aa:bb:cc:dd:ee:01",
+		ActiveMAC:       "10:bb:cc:dd:ee:01",
 		IPAddress:       "192.168.1.10",
 		SyncedHostname:  "laptop",
 		DNSRecordSynced: true,
@@ -140,7 +140,7 @@ func TestRunOnceIdentityDeletesRecordWhenNoMemberIsFresh(t *testing.T) {
 	if err := gdb.Create(&ident).Error; err != nil {
 		t.Fatalf("seeding identity: %v", err)
 	}
-	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "aa:bb:cc:dd:ee:01", Priority: 0}).Error; err != nil {
+	if err := gdb.Create(&db.IdentityMember{IdentityID: ident.ID, MAC: "10:bb:cc:dd:ee:01", Priority: 0}).Error; err != nil {
 		t.Fatalf("seeding member: %v", err)
 	}
 

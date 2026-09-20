@@ -14,16 +14,17 @@
   <button type="submit">Filter</button>
   {{if or .FilterMAC .FilterActor}}<a href="/events">Clear</a>{{end}}
 </form>
+<div class="datatable" data-datatable data-storage-key="events">
 <div class="table-wrap">
-<table class="events">
+<table class="events" id="events-table">
 <thead>
 <tr>
-  <th>Time</th>
-  <th>MAC</th>
-  <th>Actor</th>
-  <th>Action</th>
-  <th>Result</th>
-  <th>Detail</th>
+  <th data-key="time" data-sort-type="date">Time</th>
+  <th data-key="mac">MAC</th>
+  <th data-key="actor">Actor</th>
+  <th data-key="action">Action</th>
+  <th data-key="result" class="no-sort">Result</th>
+  <th data-key="detail">Detail</th>
 </tr>
 </thead>
 <tbody>
@@ -42,4 +43,6 @@
 </tbody>
 </table>
 </div>
+</div>
+<script src="/static/tables.js"></script>
 {{end}}

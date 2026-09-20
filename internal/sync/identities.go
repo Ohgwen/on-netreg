@@ -19,8 +19,9 @@ import (
 // should currently back the shared DNS record (registry.SelectActive) and
 // applies whatever create/update/delete is needed to match, reusing the
 // same applyChanges/SyncEvent machinery as per-device sync. A successful
-// create/update is followed by a DNS lookup against the Technitium server
-// itself, confirming the record actually resolves as expected.
+// create/update is followed by a DNS lookup against the configured
+// verification DNS server (or the Technitium server itself, if none is
+// set), confirming the record actually resolves as expected.
 func (e *Engine) syncIdentities(ctx context.Context, dns DNSClient, dnsCfg config.TechnitiumConfig, appSettings db.AppSettings) error {
 	var identities []db.Identity
 	if err := e.DB.Find(&identities).Error; err != nil {
@@ -57,7 +58,10 @@ func (e *Engine) syncIdentities(ctx context.Context, dns DNSClient, dnsCfg confi
 		freshWindow = 2 * config.Defaults().Unifi.PollInterval
 	}
 	isAlive := e.isAliveFunc()
-	dnsHost := technitium.HostFromBaseURL(dnsCfg.BaseURL)
+	dnsHost := dnsCfg.VerifyDNSServer
+	if dnsHost == "" {
+		dnsHost = technitium.HostFromBaseURL(dnsCfg.BaseURL)
+	}
 	now := time.Now()
 
 	var changes []registry.Change

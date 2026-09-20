@@ -35,6 +35,20 @@ type Device struct {
 	// controller, kept for display even when NetworkID is nil.
 	UniFiNetworkName string
 
+	// Extended UniFi connection details, refreshed every sync cycle.
+	// Wireless-only fields (Essid, RadioProto, Signal) are blank/zero for
+	// wired clients, and SwPort is 0 for wireless ones.
+	Essid         string
+	RadioProto    string
+	Signal        int
+	SwPort        int
+	UptimeSeconds int
+	RxBytes       int64
+	TxBytes       int64
+	// Blocked reflects whether the UniFi controller is currently blocking
+	// this client's network access.
+	Blocked bool
+
 	// Zone is the DNS zone the device's current DNS record actually lives
 	// in (mirrors Hostname/IPAddress as "current synced state"), so a later
 	// zone-mapping change can still locate and update/delete the old
