@@ -162,6 +162,14 @@ button.danger { background: var(--error); }
 .badge-muted { background: rgba(154,161,171,0.15); color: var(--muted); }
 .badge-warn { background: rgba(210,153,34,0.15); color: var(--warn); }
 
+.flash.error { background: rgba(248,81,73,0.15); color: var(--error); }
+.muted { color: var(--muted); font-size: 0.85rem; margin-left: 0.5rem; }
+.page-actions { display: flex; align-items: center; gap: var(--space-2); }
+.page-actions form { margin: 0; }
+a.button { display: inline-flex; align-items: center; background: var(--accent); color: white; border-radius: 4px; padding: 0 0.9rem; font-size: 0.85rem; min-height: 2.25rem; text-decoration: none; }
+a.button:hover { filter: brightness(1.1); }
+td input[data-user-search] { width: 10rem; }
+
 .flash { background: rgba(79,140,255,0.15); color: var(--accent); padding: 0.5rem 0.75rem; border-radius: 4px; }
 
 a { color: var(--accent); }

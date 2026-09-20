@@ -164,6 +164,11 @@ func (e *Engine) RunOnce(ctx context.Context) error {
 		errs = append(errs, fmt.Errorf("syncing identities: %w", err))
 	}
 
+	if err := e.syncAliases(ctx, dns, dnsCfg); err != nil {
+		e.Logger.Error("syncing aliases failed", "error", err)
+		errs = append(errs, fmt.Errorf("syncing aliases: %w", err))
+	}
+
 	return errors.Join(errs...)
 }
 

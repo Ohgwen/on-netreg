@@ -57,7 +57,7 @@ func Migrate(gdb *gorm.DB) error {
 	if err := gdb.AutoMigrate(
 		&Device{}, &SyncEvent{},
 		&UnifiController{}, &UnifiNetwork{}, &TechnitiumSettings{}, &AppSettings{},
-		&Identity{}, &IdentityMember{},
+		&Identity{}, &IdentityMember{}, &DeviceAlias{},
 	); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}

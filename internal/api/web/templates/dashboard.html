@@ -1,9 +1,12 @@
 {{define "content"}}
 <div class="page-head">
   <h1>Devices</h1>
-  <form method="post" action="/sync">
-    <button type="submit">Sync now</button>
-  </form>
+  <div class="page-actions">
+    <a class="button" href="/register">Register device</a>
+    <form method="post" action="/sync">
+      <button type="submit">Sync now</button>
+    </form>
+  </div>
 </div>
 {{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
 <form method="get" action="/" class="filter-form">
@@ -17,6 +20,16 @@
     <option value="{{.}}" {{if eq . $selectedNetwork}}selected{{end}}>{{.}}</option>
     {{end}}
   </select>
+  {{if .Consoles}}
+  <label class="visually-hidden" for="filter-console">Filter by UniFi console</label>
+  <select id="filter-console" name="console">
+    <option value="">All consoles</option>
+    {{$selectedConsole := .FilterConsole}}
+    {{range .Consoles}}
+    <option value="{{.ID}}" {{if eq (printf "%d" .ID) $selectedConsole}}selected{{end}}>{{.Name}}</option>
+    {{end}}
+  </select>
+  {{end}}
   <label class="visually-hidden" for="filter-zone">Filter by zone</label>
   <select id="filter-zone" name="zone">
     <option value="">All zones</option>
@@ -39,7 +52,7 @@
     </div>
   </details>
   <button type="submit">Filter</button>
-  {{if or .Search .FilterNetwork .FilterZone .FilterCreatedFrom .FilterCreatedTo .FilterSeenFrom .FilterSeenTo}}<a href="/">Clear</a>{{end}}
+  {{if or .Search .FilterConsole .FilterNetwork .FilterZone .FilterCreatedFrom .FilterCreatedTo .FilterSeenFrom .FilterSeenTo}}<a href="/">Clear</a>{{end}}
 </form>
 
 <form method="post" action="/devices/bulk" id="bulk-form">
@@ -50,10 +63,12 @@
 <tr>
   <th class="no-sort no-export col-check"><input type="checkbox" id="select-all" aria-label="Select all devices"></th>
   <th data-key="hostname">Hostname</th>
+  <th data-key="console">Console</th>
   <th data-key="network">Network</th>
   <th data-key="zone">Zone</th>
   <th data-key="conn" data-default-hidden="1" data-sort-type="text">Connection</th>
   <th data-key="lease" class="no-sort">Lease</th>
+  <th data-key="owner"{{if not .LDAPEnabled}} data-default-hidden="1"{{end}}>Owner</th>
   <th data-key="mac">MAC</th>
   <th data-key="ip" data-sort-type="ip">IP</th>
   <th data-key="lastseen" data-sort-type="date">Last seen</th>
@@ -68,6 +83,7 @@
 <tr class="{{if .Excluded}}excluded{{end}}{{if not .DNSRecordSynced}} unsynced{{end}}">
   <td class="col-check"><input type="checkbox" class="row-select" name="ids" value="{{.ID}}" aria-label="Select {{.EffectiveHostname}}"></td>
   <td><a href="/devices/{{.ID}}">{{.EffectiveHostname}}</a></td>
+  <td>{{if .ControllerName}}{{.ControllerName}}{{else}}<span class="badge badge-muted">&mdash;</span>{{end}}</td>
   <td>{{.UniFiNetworkName}}</td>
   <td class="mono">{{.Zone}}</td>
   <td>
@@ -81,14 +97,15 @@
     {{else if .LeaseEstimatedExpiry}}<span class="badge badge-muted" title="estimated from last seen + the network's configured DHCP lease time">DHCP · est. {{datetimePtr .LeaseEstimatedExpiry}}</span>
     {{else}}<span class="badge badge-muted">DHCP</span>{{end}}
   </td>
+  <td>{{if .OwnerUsername}}<a href="/?q={{.OwnerUsername}}" title="{{.OwnerEmail}}">{{if .OwnerName}}{{.OwnerName}}{{else}}{{.OwnerUsername}}{{end}}</a>{{end}}</td>
   <td class="mono">{{.MAC}}</td>
   <td class="mono">{{.IPAddress}}</td>
-  <td>{{datetime .LastSeen}}</td>
+  <td>{{if .LastSeen.IsZero}}<span class="badge badge-muted" title="registered, not connected yet">never</span>{{else}}{{datetime .LastSeen}}{{end}}</td>
   <td>
     {{if .IdentityName}}<span class="badge badge-muted" title="this MAC's own record is suppressed -- {{.IdentityName}} speaks for it">part of {{.IdentityName}}</span>
     {{else if .Excluded}}<span class="badge badge-muted">excluded</span>
     {{else if .DNSRecordSynced}}<span class="badge badge-ok">synced</span>
-    {{else if not .IPAddress}}<span class="badge badge-muted" title="no DNS record until it has an address">no IP</span>
+    {{else if not .IPAddress}}<span class="badge badge-muted" title="{{if .ControllerID}}no DNS record until it has an address{{else}}registered; waiting for its first connection{{end}}">{{if .ControllerID}}no IP{{else}}pre-registered{{end}}</span>
     {{else}}<span class="badge badge-error" title="{{.LastSyncError}}">error</span>{{end}}
     {{if .PrivateMAC}}<span class="badge badge-warn" title="Locally administered (randomized/private) MAC address -- not synced automatically since it's typically reassigned on every reconnect. Click Include to sync anyway.">private MAC</span>{{end}}
   </td>
@@ -111,7 +128,7 @@
   </td>
 </tr>
 {{else}}
-<tr><td colspan="13" class="empty">No devices yet. Try "Sync now" or wait for the next poll.</td></tr>
+<tr><td colspan="15" class="empty">No devices yet. Try "Sync now" or wait for the next poll.</td></tr>
 {{end}}
 </tbody>
 </table>
@@ -121,6 +138,13 @@
   <span id="bulk-count"></span>
   <button type="submit" name="action" value="include">Include</button>
   <button type="submit" name="action" value="exclude">Exclude</button>
+  {{if .LDAPEnabled}}
+  <label class="visually-hidden" for="bulk-owner">Username to assign</label>
+  <input type="text" id="bulk-owner" name="owner" placeholder="assign to user…" list="bulk-owner-options" data-user-search autocomplete="off">
+  <datalist id="bulk-owner-options"></datalist>
+  <button type="submit" name="action" value="assign">Assign</button>
+  <button type="submit" name="action" value="unassign">Unassign</button>
+  {{end}}
   <button type="submit" class="danger" name="action" value="forget" onclick="return confirm('Forget all selected devices and remove their DNS records?');">Forget</button>
 </div>
 </form>

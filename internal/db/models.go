@@ -109,6 +109,28 @@ func (d Device) OverrideValue() string {
 	return ""
 }
 
+// DeviceAlias is an extra DNS name (a CNAME) pointing at a device's own
+// hostname, in the device's current zone. The Synced* fields mirror what is
+// actually in DNS right now, so a rename, a zone move or the device's
+// record going away can locate and remove the old CNAME.
+type DeviceAlias struct {
+	ID uint `gorm:"primaryKey"`
+
+	DeviceID uint   `gorm:"not null;index;uniqueIndex:idx_alias_device_label"`
+	Label    string `gorm:"size:63;not null;uniqueIndex:idx_alias_device_label"`
+
+	Synced       bool `gorm:"not null;default:false"`
+	SyncedName   string
+	SyncedTarget string
+	SyncedZone   string
+	// LastSyncError is the most recent DNS failure for this alias, cleared
+	// on success.
+	LastSyncError string
+
+	CreatedBy string `gorm:"size:255"`
+	CreatedAt time.Time
+}
+
 type SyncEventAction string
 
 const (
@@ -127,6 +149,7 @@ const (
 	SyncEventSettingsChange SyncEventAction = "settings_change"
 	SyncEventRegister       SyncEventAction = "register"
 	SyncEventAssign         SyncEventAction = "assign"
+	SyncEventAlias          SyncEventAction = "alias"
 )
 
 // SystemActor identifies sync-engine-driven events, as opposed to a

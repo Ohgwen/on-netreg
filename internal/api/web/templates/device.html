@@ -3,12 +3,26 @@
   <h1>{{.Device.EffectiveHostname}}</h1>
   <a href="/">&larr; Back to devices</a>
 </div>
+{{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
 
 <div class="card">
 <table class="detail">
 <tbody>
 <tr><th>MAC</th><td class="mono">{{.Device.MAC}}</td></tr>
+<tr><th>Owner</th><td>
+  {{if .LDAPEnabled}}
+  <form method="post" action="/devices/{{.Device.ID}}/owner" class="inline">
+    <label class="visually-hidden" for="owner">Owner username</label>
+    <input type="text" id="owner" name="owner" value="{{.Device.OwnerUsername}}" placeholder="(unassigned)" list="owner-options" data-user-search autocomplete="off">
+    <datalist id="owner-options"></datalist>
+    <button type="submit">Assign</button>
+  </form>
+  {{if .Device.OwnerUsername}}<span class="muted">{{.Device.OwnerName}}{{if .Device.OwnerEmail}} &lt;{{.Device.OwnerEmail}}&gt;{{end}}</span>{{end}}
+  {{else if .Device.OwnerUsername}}{{.Device.OwnerName}} ({{.Device.OwnerUsername}})
+  {{else}}<span class="badge badge-muted">LDAP not configured</span>{{end}}
+</td></tr>
 <tr><th>UniFi name</th><td>{{.Device.UniFiName}}</td></tr>
+<tr><th>UniFi console</th><td>{{if .Device.ControllerName}}{{.Device.ControllerName}}{{else}}<span class="badge badge-muted">not seen by a console yet</span>{{end}}</td></tr>
 <tr><th>Network</th><td>{{.Device.UniFiNetworkName}}</td></tr>
 <tr><th>Zone</th><td class="mono">{{.Device.Zone}}</td></tr>
 <tr><th>IP address</th><td class="mono">{{.Device.IPAddress}}</td></tr>
@@ -17,8 +31,9 @@
   {{else if .Device.LeaseEstimatedExpiry}}<span class="badge badge-muted" title="estimated from last seen + the network's configured DHCP lease time">DHCP · estimated expiry {{datetimePtr .Device.LeaseEstimatedExpiry}}</span>
   {{else}}<span class="badge badge-muted">DHCP (lease time unknown)</span>{{end}}
 </td></tr>
-<tr><th>First seen</th><td>{{datetime .Device.FirstSeen}}</td></tr>
-<tr><th>Last seen</th><td>{{datetime .Device.LastSeen}}</td></tr>
+<tr><th>First seen</th><td>{{if .Device.FirstSeen.IsZero}}<span class="badge badge-muted">not connected yet</span>{{else}}{{datetime .Device.FirstSeen}}{{end}}</td></tr>
+<tr><th>Last seen</th><td>{{if .Device.LastSeen.IsZero}}<span class="badge badge-muted">never</span>{{else}}{{datetime .Device.LastSeen}}{{end}}</td></tr>
+{{if .Device.Registered}}<tr><th>Registered</th><td>by {{.Device.RegisteredBy}}</td></tr>{{end}}
 <tr><th>Status</th><td>
   {{if .Device.IdentityName}}<span class="badge badge-muted">part of {{.Device.IdentityName}} -- its own record is suppressed, {{.Device.IdentityName}} speaks for it</span>
   {{else if .Device.Excluded}}<span class="badge badge-muted">excluded</span>
@@ -29,6 +44,36 @@
 </td></tr>
 </tbody>
 </table>
+</div>
+
+<div class="section-head"><h2>Aliases (CNAME)</h2></div>
+<div class="card">
+<table class="detail">
+<tbody>
+{{range .Aliases}}
+<tr>
+  <th class="mono">{{.FQDN}}</th>
+  <td>
+    {{if .Synced}}<span class="badge badge-ok">synced</span>
+    {{else if .LastSyncError}}<span class="badge badge-error" title="{{.LastSyncError}}">error</span>
+    {{else}}<span class="badge badge-muted" title="published once the device has a DNS record">pending</span>{{end}}
+    <form method="post" action="/devices/{{$.Device.ID}}/aliases/{{.ID}}/delete" class="inline" onsubmit="return confirm('Remove this alias and its DNS record?');">
+      <button type="submit" class="danger" aria-label="Remove alias {{.Label}}">Remove</button>
+    </form>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="2" class="empty">No aliases. An alias is an extra name that points at {{.Device.EffectiveHostname}}.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{if not .Device.IdentityID}}
+<form method="post" action="/devices/{{.Device.ID}}/aliases" class="inline">
+  <label class="visually-hidden" for="alias-label">New alias</label>
+  <input type="text" id="alias-label" name="label" placeholder="e.g. printer" required autocomplete="off" spellcheck="false">
+  <button type="submit">Add alias</button>
+</form>
+{{end}}
 </div>
 
 <div class="section-head"><h2>Connection</h2></div>

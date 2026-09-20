@@ -9,6 +9,8 @@ type AddRecordRequest struct {
 	Type          string // e.g. "A"
 	TTL           int
 	IPAddress     string
+	// CNAME is the target FQDN when Type is "CNAME".
+	CNAME         string
 	Overwrite     bool
 	PTR           bool
 	CreatePTRZone bool

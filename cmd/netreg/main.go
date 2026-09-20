@@ -19,6 +19,7 @@ import (
 	"github.com/Ohgwen/on-netreg/internal/api/web"
 	"github.com/Ohgwen/on-netreg/internal/config"
 	"github.com/Ohgwen/on-netreg/internal/db"
+	"github.com/Ohgwen/on-netreg/internal/directory"
 	"github.com/Ohgwen/on-netreg/internal/logging"
 	"github.com/Ohgwen/on-netreg/internal/settings"
 	"github.com/Ohgwen/on-netreg/internal/sync"
@@ -118,6 +119,13 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 		return technitium.New(technitiumCfg), nil
 	}
 
+	var userDirectory directory.Directory
+	if cfg.LDAP.Enabled() {
+		userDirectory = directory.New(cfg.LDAP)
+	} else {
+		logger.Info("ldap.url not set; assigning devices to users is disabled")
+	}
+
 	h := &handlers.Handlers{
 		DB:          gdb,
 		Engine:      engine,
@@ -126,6 +134,7 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 		Logger:      logger,
 		CurrentUser: currentUser,
 		IsAdmin:     currentUserIsAdmin,
+		Directory:   userDirectory,
 	}
 
 	settingsHandlers := &handlers.SettingsHandlers{

@@ -148,6 +148,9 @@ func (c *Client) AddRecord(ctx context.Context, r AddRecordRequest) error {
 	if r.IPAddress != "" {
 		q.Set("ipAddress", r.IPAddress)
 	}
+	if r.CNAME != "" {
+		q.Set("cname", r.CNAME)
+	}
 	if r.Overwrite {
 		q.Set("overwrite", "true")
 	}

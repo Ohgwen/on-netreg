@@ -18,6 +18,7 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Ohgwen/on-netreg/internal/db"
+	"github.com/Ohgwen/on-netreg/internal/directory"
 	"github.com/Ohgwen/on-netreg/internal/macaddr"
 	"github.com/Ohgwen/on-netreg/internal/technitium"
 )
@@ -28,6 +29,9 @@ import (
 type deviceView struct {
 	db.Device
 	IdentityName string
+	// ControllerName is the UniFi console the device was last seen on; blank
+	// for a pre-registered device no console has reported yet.
+	ControllerName string
 	// PrivateMAC reports whether this device's MAC address is locally
 	// administered (a randomized "private" address), computed fresh from
 	// the MAC on every render so it applies to devices tracked before this
@@ -68,6 +72,9 @@ type Handlers struct {
 	Logger      *slog.Logger
 	CurrentUser func(*http.Request) string
 	IsAdmin     func(*http.Request) bool
+	// Directory is the LDAP user directory devices can be assigned to;
+	// nil when LDAP isn't configured (owner assignment is then disabled).
+	Directory directory.Directory
 }
 
 type pageData struct {
@@ -80,11 +87,14 @@ type pageData struct {
 	Events  []db.SyncEvent
 
 	// device.html
-	Device deviceView
+	Device  deviceView
+	Aliases []aliasView
 
 	// dashboard.html filters
 	Search            string
 	FilterNetwork     string
+	FilterConsole     string
+	Consoles          []db.UnifiController
 	FilterZone        string
 	FilterCreatedFrom string
 	FilterCreatedTo   string
@@ -105,6 +115,13 @@ type pageData struct {
 	TechSettings    db.TechnitiumSettings
 	Zones           []technitium.ZoneInfo
 
+	// register.html / owner assignment
+	LDAPEnabled bool
+	FormMAC     string
+	FormHost    string
+	FormOwner   string
+	FormError   string
+
 	// settings_identities.html
 	IdentityViews []identityView
 	UnclaimedMACs []string
@@ -122,12 +139,15 @@ func (h *Handlers) Routes() http.Handler {
 	mux.HandleFunc("POST /devices/{id}/exclude", h.toggleExclude)
 	mux.HandleFunc("POST /devices/{id}/forget", h.forgetDevice)
 	mux.HandleFunc("POST /devices/bulk", h.bulkAction)
+	h.registerRoutes(mux)
+	h.aliasRoutes(mux)
 	return mux
 }
 
 func (h *Handlers) render(w http.ResponseWriter, r *http.Request, page string, data pageData) {
 	data.User = h.CurrentUser(r)
 	data.IsAdmin = h.IsAdmin(r)
+	data.LDAPEnabled = h.Directory != nil
 	tmpl, ok := h.Pages[page]
 	if !ok {
 		http.Error(w, "template not found: "+page, http.StatusInternalServerError)
@@ -171,6 +191,7 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 	search := strings.TrimSpace(r.URL.Query().Get("q"))
 	networkFilter := r.URL.Query().Get("network")
 	zoneFilter := r.URL.Query().Get("zone")
+	consoleFilter := r.URL.Query().Get("console")
 	createdFrom := r.URL.Query().Get("created_from")
 	createdTo := r.URL.Query().Get("created_to")
 	seenFrom := r.URL.Query().Get("seen_from")
@@ -179,13 +200,16 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 	query := h.DB.Order("hostname")
 	if search != "" {
 		like := "%" + search + "%"
-		query = query.Where("hostname LIKE ? OR mac LIKE ? OR ip_address LIKE ? OR uni_fi_name LIKE ?", like, like, like, like)
+		query = query.Where("hostname LIKE ? OR mac LIKE ? OR ip_address LIKE ? OR uni_fi_name LIKE ? OR owner_username LIKE ? OR owner_name LIKE ?", like, like, like, like, like, like)
 	}
 	if networkFilter != "" {
 		query = query.Where("uni_fi_network_name = ?", networkFilter)
 	}
 	if zoneFilter != "" {
 		query = query.Where("zone = ?", zoneFilter)
+	}
+	if id, err := strconv.ParseUint(consoleFilter, 10, 64); err == nil {
+		query = query.Where("controller_id = ?", uint(id))
 	}
 	if t, ok := parseFilterDate(createdFrom); ok {
 		query = query.Where("created_at >= ?", t)
@@ -210,13 +234,24 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	var consoles []db.UnifiController
+	if err := h.DB.Order("name").Find(&consoles).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	consoleNames := make(map[uint]string, len(consoles))
+	for _, c := range consoles {
+		consoleNames[c.ID] = c.Name
+	}
 	views := make([]deviceView, 0, len(devices))
 	for _, d := range devices {
 		var identityName string
 		if d.IdentityID != nil {
 			identityName = names[*d.IdentityID]
 		}
-		views = append(views, newDeviceView(d, identityName))
+		v := newDeviceView(d, identityName)
+		v.ControllerName = consoleNames[d.ControllerID]
+		views = append(views, v)
 	}
 
 	var networks []string
@@ -236,6 +271,8 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 		Flash:             r.URL.Query().Get("flash"),
 		Search:            search,
 		FilterNetwork:     networkFilter,
+		FilterConsole:     consoleFilter,
+		Consoles:          consoles,
 		FilterZone:        zoneFilter,
 		FilterCreatedFrom: createdFrom,
 		FilterCreatedTo:   createdTo,
@@ -301,11 +338,24 @@ func (h *Handlers) deviceDetail(w http.ResponseWriter, r *http.Request) {
 			identityName = ident.Name
 		}
 	}
+	aliases, err := h.aliasViews(dev)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	view := newDeviceView(dev, identityName)
+	if dev.ControllerID != 0 {
+		var ctrl db.UnifiController
+		if err := h.DB.First(&ctrl, dev.ControllerID).Error; err == nil {
+			view.ControllerName = ctrl.Name
+		}
+	}
 	h.render(w, r, "device", pageData{
-		Title:  dev.EffectiveHostname(),
-		Device: view,
-		Events: events,
+		Title:   dev.EffectiveHostname(),
+		Device:  view,
+		Aliases: aliases,
+		Events:  events,
+		Flash:   r.URL.Query().Get("flash"),
 	})
 }
 
@@ -441,6 +491,20 @@ func (h *Handlers) bulkAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Resolve the bulk owner once so a bad username fails the whole action
+	// up front instead of once per device.
+	bulkOwner := strings.TrimSpace(r.FormValue("owner"))
+	if action == "assign" {
+		if bulkOwner == "" {
+			http.Redirect(w, r, "/?flash="+url.QueryEscape("Enter a username to assign."), http.StatusSeeOther)
+			return
+		}
+		if _, err := h.lookupOwner(r.Context(), bulkOwner); err != nil {
+			http.Redirect(w, r, "/?flash="+url.QueryEscape(err.Error()), http.StatusSeeOther)
+			return
+		}
+	}
+
 	count := 0
 	for _, idStr := range ids {
 		id, err := strconv.ParseUint(idStr, 10, 64)
@@ -462,6 +526,14 @@ func (h *Handlers) bulkAction(w http.ResponseWriter, r *http.Request) {
 			}
 		case "forget":
 			if err := h.forgetOne(r, dev); err == nil {
+				count++
+			}
+		case "assign", "unassign":
+			owner := ""
+			if action == "assign" {
+				owner = bulkOwner
+			}
+			if _, err := h.assignOwner(r, dev, owner); err == nil {
 				count++
 			}
 		}
@@ -507,6 +579,22 @@ func (h *Handlers) forgetOne(r *http.Request, dev db.Device) error {
 				h.Logger.Error("failed to delete DNS record for forgotten device", "mac", dev.MAC, "domain", domain, "error", err)
 			}
 		}
+	}
+
+	// Take the device's CNAME aliases down with it.
+	var aliases []db.DeviceAlias
+	if err := h.DB.Where("device_id = ?", dev.ID).Find(&aliases).Error; err != nil {
+		return err
+	}
+	for _, a := range aliases {
+		if a.Synced {
+			if err := h.deleteAliasRecord(r.Context(), a); err != nil {
+				h.Logger.Error("failed to delete CNAME for forgotten device", "mac", dev.MAC, "name", a.SyncedName, "error", err)
+			}
+		}
+	}
+	if err := h.DB.Where("device_id = ?", dev.ID).Delete(&db.DeviceAlias{}).Error; err != nil {
+		return err
 	}
 
 	if err := h.DB.Delete(&dev).Error; err != nil {

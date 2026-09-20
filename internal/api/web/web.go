@@ -65,7 +65,7 @@ var funcMap = template.FuncMap{
 
 // pages lists the content templates that get combined with layout.html.
 var pages = []string{
-	"dashboard", "events", "device",
+	"dashboard", "events", "device", "register",
 	"settings_general", "settings_controllers", "settings_technitium", "settings_zones", "settings_identities",
 }
 

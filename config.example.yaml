@@ -46,6 +46,21 @@ oidc:
   groups_claim: groups
   admin_group: netreg-admins
 
+# Optional: enables assigning devices to users looked up in LDAP (owner
+# autocomplete on the dashboard, device page and Register form). Leave url
+# blank to disable.
+ldap:
+  url: ldaps://ldap.example.com:636
+  bind_dn: cn=netreg,ou=service,dc=example,dc=com
+  bind_password: changeme
+  base_dn: ou=people,dc=example,dc=com
+  # start_tls: false             # upgrade a plain ldap:// connection
+  # insecure_skip_verify: false
+  user_filter: "(objectClass=person)"   # AD: "(&(objectCategory=person)(objectClass=user))"
+  username_attr: uid                    # AD: sAMAccountName
+  display_name_attr: cn                 # AD: displayName
+  mail_attr: mail
+
 server:
   listen_addr: ":8080"
   # Set to false (or run with -disable-auth) to serve the dashboard with no

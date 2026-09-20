@@ -530,3 +530,21 @@ func TestReconcileExistingPrivateMACDeviceKeepsSyncingOnceIncluded(t *testing.T)
 		t.Fatalf("expected an already-included private-MAC device to keep syncing normally, got %+v", result.Changes)
 	}
 }
+
+func TestReconcilePreRegisteredDeviceGetsRecordOnFirstConnection(t *testing.T) {
+	override := "front-printer"
+	pre := db.Device{ID: 1, MAC: "aa:bb:cc:dd:ee:01", Hostname: "front-printer", OverrideHostname: &override, Registered: true}
+	now := time.Now()
+	seen := []unifi.NetworkClient{makeClient("aa:bb:cc:dd:ee:01", "", "")}
+
+	res := Reconcile(now, 7, []db.Device{pre}, seen, config.DNSConfig{FallbackPattern: "{vendor}-{macsuffix}"},
+		func(unifi.NetworkClient) NetworkInfo { return NetworkInfo{Zone: "lan.example.com"} }, nil)
+
+	if len(res.Changes) != 1 || res.Changes[0].Kind != ChangeCreate || res.Changes[0].Hostname != "front-printer" {
+		t.Fatalf("changes = %+v, want one create for front-printer", res.Changes)
+	}
+	dev := res.Devices[0]
+	if dev.ControllerID != 7 || dev.FirstSeen.IsZero() || !dev.LastSeen.Equal(now) {
+		t.Errorf("device not adopted on first sight: %+v", dev)
+	}
+}

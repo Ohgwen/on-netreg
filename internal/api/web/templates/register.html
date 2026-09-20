@@ -1,0 +1,23 @@
+{{define "content"}}
+<div class="page-head">
+  <h1>Register device</h1>
+  <a href="/">&larr; Back to devices</a>
+</div>
+{{if .FormError}}<p class="flash error" role="alert">{{.FormError}}</p>{{end}}
+<div class="card">
+  <p class="empty">Reserve a hostname for a MAC address before the device connects; its DNS record is created the first time it gets an address. If the MAC is already known, this changes its hostname and updates the existing record.</p>
+  <form method="post" action="/register" class="form-grid">
+    <label>MAC address <input type="text" name="mac" value="{{.FormMAC}}" placeholder="aa:bb:cc:dd:ee:ff" required autocomplete="off" spellcheck="false"></label>
+    <label>Hostname <input type="text" name="hostname" value="{{.FormHost}}" placeholder="printer-2f" required autocomplete="off" spellcheck="false"></label>
+    {{if .LDAPEnabled}}
+    <label>Assign to user (optional)
+      <input type="text" name="owner" value="{{.FormOwner}}" list="owner-options" data-user-search autocomplete="off">
+      <datalist id="owner-options"></datalist>
+    </label>
+    {{end}}
+    <div class="actions">
+      <button type="submit">Register</button>
+    </div>
+  </form>
+</div>
+{{end}}
