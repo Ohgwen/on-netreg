@@ -70,6 +70,13 @@ type Device struct {
 	Registered   bool
 	RegisteredBy string `gorm:"size:255"`
 
+	// ZoneOverride, when set, pins the device's DNS zone regardless of which
+	// network/VLAN it is on; blank means "follow the network's mapped zone".
+	ZoneOverride string `gorm:"size:255"`
+	// OS and Description are free-text notes entered at registration.
+	OS          string `gorm:"size:100"`
+	Description string `gorm:"size:500"`
+
 	// Owner* is the directory (LDAP) user this device is assigned to. The
 	// name/email are a snapshot taken at assignment time so the dashboard
 	// doesn't need the directory to render.

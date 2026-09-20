@@ -1,7 +1,7 @@
 {{define "content"}}
 <div class="page-head">
   <h1>{{.Device.EffectiveHostname}}</h1>
-  <a href="/">&larr; Back to devices</a>
+  <span><a href="/register?mac={{.Device.MAC}}">Edit registration</a> &middot; <a href="/">&larr; Back to devices</a></span>
 </div>
 {{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
 
@@ -24,7 +24,9 @@
 <tr><th>UniFi name</th><td>{{.Device.UniFiName}}</td></tr>
 <tr><th>UniFi console</th><td>{{if .Device.ControllerName}}{{.Device.ControllerName}}{{else}}<span class="badge badge-muted">not seen by a console yet</span>{{end}}</td></tr>
 <tr><th>Network</th><td>{{.Device.UniFiNetworkName}}</td></tr>
-<tr><th>Zone</th><td class="mono">{{.Device.Zone}}</td></tr>
+<tr><th>Zone</th><td class="mono">{{.Device.Zone}}{{if .Device.ZoneOverride}} <span class="badge badge-muted" title="pinned at registration; ignores the network's mapped zone">pinned{{if ne .Device.Zone .Device.ZoneOverride}} → {{.Device.ZoneOverride}}{{end}}</span>{{end}}</td></tr>
+{{if .Device.OS}}<tr><th>OS</th><td>{{.Device.OS}}</td></tr>{{end}}
+{{if .Device.Description}}<tr><th>Description</th><td>{{.Device.Description}}</td></tr>{{end}}
 <tr><th>IP address</th><td class="mono">{{.Device.IPAddress}}</td></tr>
 <tr><th>Lease</th><td>
   {{if .Device.IsFixedIP}}<span class="badge badge-muted">static / fixed IP</span>

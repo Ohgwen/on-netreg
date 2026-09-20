@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -32,11 +34,125 @@ func (h *Handlers) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /devices/{id}/owner", h.setOwner)
 }
 
+// registerInput is the register form's fields, as entered.
+type registerInput struct {
+	MAC, Hostname, Zone, OS, Description, Owner string
+}
+
+func inputFromForm(r *http.Request) registerInput {
+	return registerInput{
+		MAC:         r.FormValue("mac"),
+		Hostname:    r.FormValue("hostname"),
+		Zone:        r.FormValue("zone"),
+		OS:          r.FormValue("os"),
+		Description: r.FormValue("description"),
+		Owner:       r.FormValue("owner"),
+	}
+}
+
+// formPage builds the register page for in, optionally with an error.
+func (h *Handlers) formPage(ctx context.Context, in registerInput, formErr string) pageData {
+	return pageData{
+		Title:     "Register device",
+		FormMAC:   in.MAC,
+		FormHost:  in.Hostname,
+		FormZone:  in.Zone,
+		FormOS:    in.OS,
+		FormDesc:  in.Description,
+		FormOwner: in.Owner,
+		FormError: formErr,
+		RegZones:  h.zoneChoices(ctx),
+	}
+}
+
+// registerForm shows an empty form, or -- given ?mac= for a device that is
+// already registered -- that device's current settings to edit.
 func (h *Handlers) registerForm(w http.ResponseWriter, r *http.Request) {
-	h.render(w, r, "register", pageData{
-		Title:   "Register device",
-		FormMAC: r.URL.Query().Get("mac"),
-	})
+	in := registerInput{MAC: r.URL.Query().Get("mac")}
+	if mac, ok := macaddr.Parse(in.MAC); ok {
+		var dev db.Device
+		if err := h.DB.Where("mac = ?", mac).First(&dev).Error; err == nil {
+			in = registerInput{
+				MAC:         dev.MAC,
+				Hostname:    dev.EffectiveHostname(),
+				Zone:        dev.ZoneOverride,
+				OS:          dev.OS,
+				Description: dev.Description,
+				Owner:       dev.OwnerUsername,
+			}
+		}
+	}
+	h.render(w, r, "register", h.formPage(r.Context(), in, ""))
+}
+
+// zoneChoices lists zones to offer in the form: those on the Technitium
+// server (best effort) plus any already in use by a device.
+func (h *Handlers) zoneChoices(ctx context.Context) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(z string) {
+		if z != "" && !seen[z] {
+			seen[z] = true
+			out = append(out, z)
+		}
+	}
+	for _, z := range h.liveZones(ctx) {
+		add(z)
+	}
+	var inUse []string
+	h.DB.Model(&db.Device{}).Where("zone <> ''").Distinct().Order("zone").Pluck("zone", &inUse)
+	for _, z := range inUse {
+		add(z)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// liveZones best-effort lists the zones hosted on the Technitium server;
+// nil if it can't be reached.
+func (h *Handlers) liveZones(ctx context.Context) []string {
+	if h.DNS == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	dns, err := h.DNS(ctx)
+	if err != nil {
+		return nil
+	}
+	zones, err := dns.ListZones(ctx)
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(zones))
+	for _, z := range zones {
+		names = append(names, z.Name)
+	}
+	return names
+}
+
+var zoneNameRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
+
+// normalizeZone validates an admin-typed zone. Blank means automatic.
+func (h *Handlers) normalizeZone(ctx context.Context, raw string) (string, error) {
+	zone := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(raw)), ".")
+	if zone == "" {
+		return "", nil
+	}
+	if !zoneNameRe.MatchString(zone) {
+		return "", inputError("Not a valid zone name.")
+	}
+	// If the server's zone list is available, only accept zones it hosts:
+	// a record can't be created in a zone Technitium doesn't have.
+	if live := h.liveZones(ctx); len(live) > 0 {
+		for _, z := range live {
+			if strings.EqualFold(z, zone) {
+				return zone, nil
+			}
+		}
+		return "", inputError(fmt.Sprintf("Zone %q doesn't exist on the DNS server.", zone))
+	}
+	return zone, nil
 }
 
 func (h *Handlers) registerSubmit(w http.ResponseWriter, r *http.Request) {
@@ -44,9 +160,9 @@ func (h *Handlers) registerSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	mac, hostname, owner := r.FormValue("mac"), r.FormValue("hostname"), r.FormValue("owner")
+	in := inputFromForm(r)
 
-	dev, existed, err := h.registerDevice(r.Context(), h.CurrentUser(r), mac, hostname, owner)
+	dev, existed, err := h.registerDevice(r.Context(), h.CurrentUser(r), in)
 	if err != nil {
 		var ie inputError
 		if !errors.As(err, &ie) {
@@ -54,13 +170,7 @@ func (h *Handlers) registerSubmit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		w.WriteHeader(http.StatusUnprocessableEntity)
-		h.render(w, r, "register", pageData{
-			Title:     "Register device",
-			FormMAC:   mac,
-			FormHost:  hostname,
-			FormOwner: owner,
-			FormError: ie.Error(),
-		})
+		h.render(w, r, "register", h.formPage(r.Context(), in, ie.Error()))
 		return
 	}
 
@@ -86,18 +196,26 @@ func (h *Handlers) registerSubmit(w http.ResponseWriter, r *http.Request) {
 // hostname becomes the device's override, so the sync engine publishes it
 // as soon as the client has an address, and the device is included in DNS
 // sync. owner is an optional directory username.
-func (h *Handlers) registerDevice(ctx context.Context, actor, rawMAC, rawHostname, ownerName string) (db.Device, bool, error) {
-	mac, ok := macaddr.Parse(rawMAC)
+func (h *Handlers) registerDevice(ctx context.Context, actor string, in registerInput) (db.Device, bool, error) {
+	mac, ok := macaddr.Parse(in.MAC)
 	if !ok {
 		return db.Device{}, false, inputError("Not a valid MAC address. Use e.g. aa:bb:cc:dd:ee:ff.")
 	}
-	hostname := registry.SanitizeLabel(rawHostname)
+	hostname := registry.SanitizeLabel(in.Hostname)
 	if hostname == "" {
 		return db.Device{}, false, inputError("Enter a hostname (letters, digits and hyphens).")
 	}
+	zone, err := h.normalizeZone(ctx, in.Zone)
+	if err != nil {
+		return db.Device{}, false, err
+	}
+	osName, desc := strings.TrimSpace(in.OS), strings.TrimSpace(in.Description)
+	if len([]rune(osName)) > 100 || len([]rune(desc)) > 500 {
+		return db.Device{}, false, inputError("OS is limited to 100 characters and the description to 500.")
+	}
 	var owner *directory.User
-	if strings.TrimSpace(ownerName) != "" {
-		u, err := h.lookupOwner(ctx, ownerName)
+	if strings.TrimSpace(in.Owner) != "" {
+		u, err := h.lookupOwner(ctx, in.Owner)
 		if err != nil {
 			return db.Device{}, false, err
 		}
@@ -106,7 +224,7 @@ func (h *Handlers) registerDevice(ctx context.Context, actor, rawMAC, rawHostnam
 
 	var dev db.Device
 	existed := false
-	err := h.DB.Transaction(func(tx *gorm.DB) error {
+	err = h.DB.Transaction(func(tx *gorm.DB) error {
 		err := tx.Where("mac = ?", mac).First(&dev).Error
 		switch {
 		case err == nil:
@@ -121,6 +239,10 @@ func (h *Handlers) registerDevice(ctx context.Context, actor, rawMAC, rawHostnam
 		}
 
 		previous := dev.EffectiveHostname()
+		previousZone := dev.ZoneOverride
+		dev.ZoneOverride = zone
+		dev.OS = osName
+		dev.Description = desc
 		dev.Hostname = hostname
 		dev.OverrideHostname = &hostname
 		dev.Excluded = false
@@ -140,6 +262,9 @@ func (h *Handlers) registerDevice(ctx context.Context, actor, rawMAC, rawHostnam
 		if existed {
 			detail = fmt.Sprintf("re-registered: hostname %s -> %s", previous, hostname)
 		}
+		if zone != previousZone || !existed && zone != "" {
+			detail += ", zone " + zoneLabel(zone)
+		}
 		if owner != nil {
 			detail += ", owner " + owner.Username
 		}
@@ -153,6 +278,13 @@ func (h *Handlers) registerDevice(ctx context.Context, actor, rawMAC, rawHostnam
 		return db.Device{}, false, err
 	}
 	return dev, existed, nil
+}
+
+func zoneLabel(z string) string {
+	if z == "" {
+		return "automatic"
+	}
+	return z
 }
 
 func isUniqueViolation(err error) bool {

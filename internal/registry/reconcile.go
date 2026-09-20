@@ -93,6 +93,10 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 		existingDevice, found := existingByMAC[client.MAC]
 		info := resolveNetwork(client)
 		zone := info.Zone
+		// An admin-pinned zone wins over whatever the client's network maps to.
+		if found && existingDevice.ZoneOverride != "" {
+			zone = existingDevice.ZoneOverride
+		}
 
 		hasValidIP := HasValidIP(client.IP)
 

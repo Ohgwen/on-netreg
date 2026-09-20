@@ -42,6 +42,8 @@ func (h *Handlers) aliasViews(dev db.Device) ([]aliasView, error) {
 			v.FQDN = a.SyncedName
 		case dev.Zone != "":
 			v.FQDN = a.Label + "." + dev.Zone
+		case dev.ZoneOverride != "":
+			v.FQDN = a.Label + "." + dev.ZoneOverride
 		default:
 			v.FQDN = a.Label
 		}

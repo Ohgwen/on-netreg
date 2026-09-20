@@ -16,6 +16,7 @@ import (
 	"github.com/Ohgwen/on-netreg/internal/config"
 	"github.com/Ohgwen/on-netreg/internal/db"
 	"github.com/Ohgwen/on-netreg/internal/directory"
+	"github.com/Ohgwen/on-netreg/internal/technitium"
 )
 
 type fakeDirectory struct{ users map[string]directory.User }
@@ -48,7 +49,7 @@ func testHandlers(t *testing.T) (*Handlers, *gorm.DB) {
 
 func TestRegisterNewDevice(t *testing.T) {
 	h, gdb := testHandlers(t)
-	dev, existed, err := h.registerDevice(context.Background(), "admin", "AA-BB-CC-DD-EE-01", "Front Printer", "alice")
+	dev, existed, err := h.registerDevice(context.Background(), "admin", registerInput{MAC: "AA-BB-CC-DD-EE-01", Hostname: "Front Printer", Owner: "alice"})
 	if err != nil || existed {
 		t.Fatalf("registerDevice = %v, existed=%v", err, existed)
 	}
@@ -70,7 +71,7 @@ func TestRegisterExistingDeviceChangesHostnameKeepsRecord(t *testing.T) {
 	if err := gdb.Create(&seen).Error; err != nil {
 		t.Fatal(err)
 	}
-	dev, existed, err := h.registerDevice(context.Background(), "admin", "aa:bb:cc:dd:ee:02", "new-name", "")
+	dev, existed, err := h.registerDevice(context.Background(), "admin", registerInput{MAC: "aa:bb:cc:dd:ee:02", Hostname: "new-name", Owner: ""})
 	if err != nil || !existed {
 		t.Fatalf("registerDevice = %v, existed=%v", err, existed)
 	}
@@ -102,7 +103,7 @@ func TestRegisterValidation(t *testing.T) {
 		{"identity member", "aa:bb:cc:dd:ee:03", "x", ""},
 	}
 	for _, c := range cases {
-		_, _, err := h.registerDevice(context.Background(), "admin", c.mac, c.host, c.owner)
+		_, _, err := h.registerDevice(context.Background(), "admin", registerInput{MAC: c.mac, Hostname: c.host, Owner: c.owner})
 		if _, ok := err.(inputError); !ok {
 			t.Errorf("%s: err = %v, want inputError", c.name, err)
 		}
@@ -117,7 +118,7 @@ func TestRegisterValidation(t *testing.T) {
 func TestRegisterWithoutLDAPRejectsOwner(t *testing.T) {
 	h, _ := testHandlers(t)
 	h.Directory = nil
-	if _, _, err := h.registerDevice(context.Background(), "admin", "aa:bb:cc:dd:ee:05", "x", "alice"); err == nil {
+	if _, _, err := h.registerDevice(context.Background(), "admin", registerInput{MAC: "aa:bb:cc:dd:ee:05", Hostname: "x", Owner: "alice"}); err == nil {
 		t.Error("expected error assigning owner with LDAP disabled")
 	}
 }
@@ -176,5 +177,46 @@ func TestDashboardShowsAndFiltersByConsole(t *testing.T) {
 	}
 	if !strings.Contains(body, "Branch-UDM") {
 		t.Error("console name not shown")
+	}
+}
+
+type fakeZones struct{ zones []string }
+
+func (f fakeZones) DeleteRecord(context.Context, technitium.DeleteRecordRequest) error { return nil }
+func (f fakeZones) ListZones(context.Context) ([]technitium.ZoneInfo, error) {
+	out := make([]technitium.ZoneInfo, len(f.zones))
+	for i, z := range f.zones {
+		out[i] = technitium.ZoneInfo{Name: z}
+	}
+	return out, nil
+}
+
+func TestRegisterZoneOSDescription(t *testing.T) {
+	h, gdb := testHandlers(t)
+	h.DNS = func(context.Context) (DNSClient, error) { return fakeZones{zones: []string{"iot.example.com"}}, nil }
+
+	dev, _, err := h.registerDevice(context.Background(), "admin", registerInput{
+		MAC: "aa:bb:cc:dd:ee:30", Hostname: "cam", Zone: " IOT.example.com. ", OS: " Linux ", Description: "Garage camera",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got db.Device
+	gdb.First(&got, dev.ID)
+	if got.ZoneOverride != "iot.example.com" || got.OS != "Linux" || got.Description != "Garage camera" {
+		t.Errorf("stored %+v", got)
+	}
+
+	for _, zone := range []string{"missing.example.com", "bad zone!"} {
+		_, _, err := h.registerDevice(context.Background(), "admin", registerInput{MAC: "aa:bb:cc:dd:ee:31", Hostname: "x", Zone: zone})
+		if _, ok := err.(inputError); !ok {
+			t.Errorf("zone %q: err = %v, want inputError", zone, err)
+		}
+	}
+
+	// Blank zone clears the pin.
+	dev, _, err = h.registerDevice(context.Background(), "admin", registerInput{MAC: "aa:bb:cc:dd:ee:30", Hostname: "cam"})
+	if err != nil || dev.ZoneOverride != "" {
+		t.Errorf("blank zone should clear pin: %v %+v", err, dev)
 	}
 }

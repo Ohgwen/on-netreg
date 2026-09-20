@@ -548,3 +548,23 @@ func TestReconcilePreRegisteredDeviceGetsRecordOnFirstConnection(t *testing.T) {
 		t.Errorf("device not adopted on first sight: %+v", dev)
 	}
 }
+
+func TestReconcileZoneOverrideBeatsNetworkZone(t *testing.T) {
+	resolve := func(unifi.NetworkClient) NetworkInfo { return NetworkInfo{Zone: "net.example.com"} }
+	seen := []unifi.NetworkClient{makeClient("aa:bb:cc:dd:ee:02", "cam", "")}
+
+	// Not yet published: created straight into the pinned zone.
+	dev := db.Device{ID: 1, MAC: "aa:bb:cc:dd:ee:02", Hostname: "cam", ZoneOverride: "iot.example.com"}
+	res := Reconcile(time.Now(), 1, []db.Device{dev}, seen, testDNSConfig, resolve, nil)
+	if len(res.Changes) != 1 || res.Changes[0].Zone != "iot.example.com" || res.Devices[0].Zone != "iot.example.com" {
+		t.Fatalf("got %+v", res.Changes)
+	}
+
+	// Already published in the network zone: moved (delete + create).
+	dev.Zone, dev.DNSRecordSynced, dev.IPAddress = "net.example.com", true, "192.168.1.100"
+	res = Reconcile(time.Now(), 1, []db.Device{dev}, seen, testDNSConfig, resolve, nil)
+	if len(res.Changes) != 2 || res.Changes[0].Kind != ChangeDelete || res.Changes[0].PreviousZone != "net.example.com" ||
+		res.Changes[1].Kind != ChangeCreate || res.Changes[1].Zone != "iot.example.com" {
+		t.Errorf("expected move to pinned zone, got %+v", res.Changes)
+	}
+}

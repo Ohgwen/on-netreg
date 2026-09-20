@@ -9,6 +9,12 @@
   <form method="post" action="/register" class="form-grid">
     <label>MAC address <input type="text" name="mac" value="{{.FormMAC}}" placeholder="aa:bb:cc:dd:ee:ff" required autocomplete="off" spellcheck="false"></label>
     <label>Hostname <input type="text" name="hostname" value="{{.FormHost}}" placeholder="printer-2f" required autocomplete="off" spellcheck="false"></label>
+    <label>Zone
+      <input type="text" name="zone" value="{{.FormZone}}" list="zone-options" placeholder="(automatic — by network)" autocomplete="off" spellcheck="false">
+      <datalist id="zone-options">{{range .RegZones}}<option value="{{.}}">{{end}}</datalist>
+    </label>
+    <label>Operating system (optional) <input type="text" name="os" value="{{.FormOS}}" maxlength="100" placeholder="e.g. Windows 11, iOS 18" autocomplete="off"></label>
+    <label>Description (optional) <textarea name="description" rows="3" maxlength="500" placeholder="What is it, where is it, who is it for?">{{.FormDesc}}</textarea></label>
     {{if .LDAPEnabled}}
     <label>Assign to user (optional)
       <input type="text" name="owner" value="{{.FormOwner}}" list="owner-options" data-user-search autocomplete="off">

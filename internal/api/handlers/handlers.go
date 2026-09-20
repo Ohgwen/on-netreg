@@ -57,6 +57,7 @@ type Engine interface {
 // sync cycle's delete-on-absence logic.
 type DNSClient interface {
 	DeleteRecord(ctx context.Context, r technitium.DeleteRecordRequest) error
+	ListZones(ctx context.Context) ([]technitium.ZoneInfo, error)
 }
 
 // DNSClientFactory builds a DNSClient from the Technitium connection
@@ -120,6 +121,10 @@ type pageData struct {
 	FormMAC     string
 	FormHost    string
 	FormOwner   string
+	FormZone    string
+	FormOS      string
+	FormDesc    string
+	RegZones    []string
 	FormError   string
 
 	// settings_identities.html
@@ -200,7 +205,7 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 	query := h.DB.Order("hostname")
 	if search != "" {
 		like := "%" + search + "%"
-		query = query.Where("hostname LIKE ? OR mac LIKE ? OR ip_address LIKE ? OR uni_fi_name LIKE ? OR owner_username LIKE ? OR owner_name LIKE ?", like, like, like, like, like, like)
+		query = query.Where("hostname LIKE ? OR mac LIKE ? OR ip_address LIKE ? OR uni_fi_name LIKE ? OR owner_username LIKE ? OR owner_name LIKE ? OR description LIKE ? OR os LIKE ?", like, like, like, like, like, like, like, like)
 	}
 	if networkFilter != "" {
 		query = query.Where("uni_fi_network_name = ?", networkFilter)
