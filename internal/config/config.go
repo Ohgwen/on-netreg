@@ -25,7 +25,35 @@ type Config struct {
 	DNS    DNSConfig    `yaml:"dns"`
 	OIDC   OIDCConfig   `yaml:"oidc"`
 	Server ServerConfig `yaml:"server"`
+	// LDAP is optional: when URL is empty the "assign device to user"
+	// feature is disabled.
+	LDAP LDAPConfig `yaml:"ldap"`
 }
+
+// LDAPConfig describes the directory device owners are looked up in.
+type LDAPConfig struct {
+	// URL is ldap://host:389 or ldaps://host:636. Empty disables LDAP.
+	URL      string `yaml:"url"`
+	BindDN   string `yaml:"bind_dn"`
+	BindPass string `yaml:"bind_password"`
+	BaseDN   string `yaml:"base_dn"`
+	// StartTLS upgrades a plain ldap:// connection before binding.
+	StartTLS           bool `yaml:"start_tls"`
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify"`
+	// UserFilter selects which entries count as users,
+	// e.g. "(objectClass=inetOrgPerson)" or, for Active Directory,
+	// "(&(objectCategory=person)(objectClass=user))".
+	UserFilter string `yaml:"user_filter"`
+	// UsernameAttr is the login name attribute: uid (OpenLDAP/FreeIPA) or
+	// sAMAccountName (Active Directory).
+	UsernameAttr    string        `yaml:"username_attr"`
+	DisplayNameAttr string        `yaml:"display_name_attr"`
+	MailAttr        string        `yaml:"mail_attr"`
+	Timeout         time.Duration `yaml:"timeout"`
+}
+
+// Enabled reports whether an LDAP directory is configured.
+func (c LDAPConfig) Enabled() bool { return c.URL != "" }
 
 type DatabaseConfig struct {
 	// Driver is "sqlite" or "postgres".
@@ -117,6 +145,13 @@ func Defaults() Config {
 			ListenAddr:  ":8080",
 			AuthEnabled: true,
 		},
+		LDAP: LDAPConfig{
+			UserFilter:      "(objectClass=person)",
+			UsernameAttr:    "uid",
+			DisplayNameAttr: "cn",
+			MailAttr:        "mail",
+			Timeout:         10 * time.Second,
+		},
 	}
 }
 
@@ -165,6 +200,15 @@ func (c Config) Validate() error {
 		}
 		if c.OIDC.ClientID == "" {
 			problems = append(problems, "oidc.client_id is required (or set server.auth_enabled: false)")
+		}
+	}
+
+	if c.LDAP.Enabled() {
+		if c.LDAP.BaseDN == "" {
+			problems = append(problems, "ldap.base_dn is required when ldap.url is set")
+		}
+		if !strings.HasPrefix(c.LDAP.URL, "ldap://") && !strings.HasPrefix(c.LDAP.URL, "ldaps://") {
+			problems = append(problems, "ldap.url must start with ldap:// or ldaps://")
 		}
 	}
 
@@ -233,6 +277,18 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	str("NETREG_OIDC_GROUPS_CLAIM", &cfg.OIDC.GroupsClaim)
 	str("NETREG_OIDC_ADMIN_GROUP", &cfg.OIDC.AdminGroup)
+
+	str("NETREG_LDAP_URL", &cfg.LDAP.URL)
+	str("NETREG_LDAP_BIND_DN", &cfg.LDAP.BindDN)
+	str("NETREG_LDAP_BIND_PASSWORD", &cfg.LDAP.BindPass)
+	str("NETREG_LDAP_BASE_DN", &cfg.LDAP.BaseDN)
+	boolean("NETREG_LDAP_START_TLS", &cfg.LDAP.StartTLS)
+	boolean("NETREG_LDAP_INSECURE_SKIP_VERIFY", &cfg.LDAP.InsecureSkipVerify)
+	str("NETREG_LDAP_USER_FILTER", &cfg.LDAP.UserFilter)
+	str("NETREG_LDAP_USERNAME_ATTR", &cfg.LDAP.UsernameAttr)
+	str("NETREG_LDAP_DISPLAY_NAME_ATTR", &cfg.LDAP.DisplayNameAttr)
+	str("NETREG_LDAP_MAIL_ATTR", &cfg.LDAP.MailAttr)
+	duration("NETREG_LDAP_TIMEOUT", &cfg.LDAP.Timeout)
 
 	str("NETREG_SERVER_LISTEN_ADDR", &cfg.Server.ListenAddr)
 	boolean("NETREG_SERVER_AUTH_ENABLED", &cfg.Server.AuthEnabled)

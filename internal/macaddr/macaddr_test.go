@@ -24,3 +24,27 @@ func TestIsPrivate(t *testing.T) {
 		})
 	}
 }
+
+func TestParse(t *testing.T) {
+	cases := []struct {
+		in     string
+		want   string
+		wantOK bool
+	}{
+		{"aa:bb:cc:dd:ee:ff", "aa:bb:cc:dd:ee:ff", true},
+		{"AA-BB-CC-DD-EE-FF", "aa:bb:cc:dd:ee:ff", true},
+		{"aabb.ccdd.eeff", "aa:bb:cc:dd:ee:ff", true},
+		{"AABBCCDDEEFF", "aa:bb:cc:dd:ee:ff", true},
+		{"  aa:bb:cc:dd:ee:ff  ", "aa:bb:cc:dd:ee:ff", true},
+		{"", "", false},
+		{"aa:bb:cc:dd:ee", "", false},
+		{"aa:bb:cc:dd:ee:gg", "", false},
+		{"aa:bb:cc:dd:ee:ff:00:11", "", false},
+	}
+	for _, c := range cases {
+		got, ok := Parse(c.in)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("Parse(%q) = %q, %v; want %q, %v", c.in, got, ok, c.want, c.wantOK)
+		}
+	}
+}

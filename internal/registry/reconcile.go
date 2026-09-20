@@ -109,6 +109,9 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 			dev.IsFixedIP = client.IsFixedIP
 			dev.LeaseEstimatedExpiry = estimateLeaseExpiry(now, client.IsFixedIP, info.LeaseSeconds)
 			dev.LastSeen = now
+			if dev.FirstSeen.IsZero() {
+				dev.FirstSeen = now
+			}
 			result.Devices = append(result.Devices, dev)
 			continue
 		}
@@ -248,6 +251,10 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 			dev.IPAddress = client.IP
 		}
 		dev.LastSeen = now
+		// A device registered before it ever connected has no FirstSeen yet.
+		if dev.FirstSeen.IsZero() {
+			dev.FirstSeen = now
+		}
 		result.Devices = append(result.Devices, dev)
 	}
 

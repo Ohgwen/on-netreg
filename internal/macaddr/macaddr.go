@@ -4,9 +4,32 @@
 package macaddr
 
 import (
+	"net"
 	"strconv"
 	"strings"
 )
+
+// Parse validates a user-entered MAC address and returns it in canonical
+// form (see Normalize). Accepts colon, dash, Cisco-dotted (aabb.ccdd.eeff)
+// and bare-hex (aabbccddeeff) notations; only 48-bit addresses are valid.
+func Parse(s string) (string, bool) {
+	s = strings.TrimSpace(s)
+	if len(s) == 12 && !strings.ContainsAny(s, ":-.") {
+		var b strings.Builder
+		for i := 0; i < 12; i += 2 {
+			if i > 0 {
+				b.WriteByte(':')
+			}
+			b.WriteString(s[i : i+2])
+		}
+		s = b.String()
+	}
+	hw, err := net.ParseMAC(s)
+	if err != nil || len(hw) != 6 {
+		return "", false
+	}
+	return hw.String(), true
+}
 
 // Normalize lowercases mac and converts any '-' separators to ':', so
 // "AA-BB-CC-DD-EE-FF" and "aa:bb:cc:dd:ee:ff" compare equal.

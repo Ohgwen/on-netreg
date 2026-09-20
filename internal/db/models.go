@@ -64,6 +64,19 @@ type Device struct {
 	// this is nil whenever the lease time isn't known.
 	LeaseEstimatedExpiry *time.Time
 
+	// Registered marks a device an admin registered by hand (possibly before
+	// it ever connected, in which case ControllerID is 0 and FirstSeen/
+	// LastSeen are zero until the sync engine first sees it).
+	Registered   bool
+	RegisteredBy string `gorm:"size:255"`
+
+	// Owner* is the directory (LDAP) user this device is assigned to. The
+	// name/email are a snapshot taken at assignment time so the dashboard
+	// doesn't need the directory to render.
+	OwnerUsername string `gorm:"size:255;index"`
+	OwnerName     string `gorm:"size:255"`
+	OwnerEmail    string `gorm:"size:255"`
+
 	// Excluded devices are tracked but never synced to DNS.
 	Excluded bool `gorm:"not null;default:false"`
 
@@ -112,6 +125,8 @@ const (
 	SyncEventForget         SyncEventAction = "forget"
 	SyncEventManualSync     SyncEventAction = "manual_sync"
 	SyncEventSettingsChange SyncEventAction = "settings_change"
+	SyncEventRegister       SyncEventAction = "register"
+	SyncEventAssign         SyncEventAction = "assign"
 )
 
 // SystemActor identifies sync-engine-driven events, as opposed to a
