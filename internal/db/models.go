@@ -117,14 +117,20 @@ func (d Device) OverrideValue() string {
 }
 
 // DeviceAlias is an extra DNS name (a CNAME) pointing at a device's own
-// hostname, in the device's current zone. The Synced* fields mirror what is
+// hostname. It lives in Zone, or in the device's current zone when Zone is
+// blank. The Synced* fields mirror what is
 // actually in DNS right now, so a rename, a zone move or the device's
 // record going away can locate and remove the old CNAME.
 type DeviceAlias struct {
 	ID uint `gorm:"primaryKey"`
 
-	DeviceID uint   `gorm:"not null;index;uniqueIndex:idx_alias_device_label"`
-	Label    string `gorm:"size:63;not null;uniqueIndex:idx_alias_device_label"`
+	DeviceID uint `gorm:"not null;index;uniqueIndex:idx_alias_device_label_zone"`
+	// Label is the name relative to the zone; it may have several labels
+	// (e.g. "www.east" in zone "example.com").
+	Label string `gorm:"size:253;not null;uniqueIndex:idx_alias_device_label_zone"`
+	// Zone pins the alias to a zone other than the device's; blank means
+	// "the device's current zone".
+	Zone string `gorm:"size:255;not null;default:'';uniqueIndex:idx_alias_device_label_zone"`
 
 	Synced       bool `gorm:"not null;default:false"`
 	SyncedName   string

@@ -61,5 +61,13 @@ func Migrate(gdb *gorm.DB) error {
 	); err != nil {
 		return fmt.Errorf("running migrations: %w", err)
 	}
+	// Superseded by idx_alias_device_label_zone (aliases can now be pinned
+	// to a zone); the old two-column unique index would wrongly forbid the
+	// same label in two zones.
+	if gdb.Migrator().HasIndex(&DeviceAlias{}, "idx_alias_device_label") {
+		if err := gdb.Migrator().DropIndex(&DeviceAlias{}, "idx_alias_device_label"); err != nil {
+			return fmt.Errorf("dropping old alias index: %w", err)
+		}
+	}
 	return nil
 }

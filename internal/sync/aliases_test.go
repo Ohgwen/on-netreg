@@ -91,3 +91,29 @@ func TestSyncAliasesKeepsStateWhenDeleteFails(t *testing.T) {
 		t.Errorf("failed delete must leave alias synced with an error: %+v", got)
 	}
 }
+
+func TestSyncAliasesUsesPinnedZone(t *testing.T) {
+	gdb := testDB(t)
+	dns := &fakeDNS{}
+	e := newTestEngine(gdb, dns, fakeUnifi{})
+
+	dev := db.Device{MAC: "aa:bb:cc:dd:ee:03", Hostname: "web1", Zone: "lan.example.com", DNSRecordSynced: true}
+	gdb.Create(&dev)
+	gdb.Create(&db.DeviceAlias{DeviceID: dev.ID, Label: "shop", Zone: "example.com"})
+
+	e.syncAliases(context.Background(), dns, config.TechnitiumConfig{})
+	if len(dns.addCalls) != 1 {
+		t.Fatalf("adds = %d", len(dns.addCalls))
+	}
+	add := dns.addCalls[0]
+	if add.Domain != "shop.example.com" || add.Zone != "example.com" || add.CNAME != "web1.lan.example.com" {
+		t.Errorf("unexpected add: %+v", add)
+	}
+
+	// Removal targets the alias's own zone, not the device's.
+	gdb.Model(&dev).Update("dns_record_synced", false)
+	e.syncAliases(context.Background(), dns, config.TechnitiumConfig{})
+	if len(dns.deleteCalls) != 1 || dns.deleteCalls[0].Zone != "example.com" || dns.deleteCalls[0].Domain != "shop.example.com" {
+		t.Errorf("delete calls = %+v", dns.deleteCalls)
+	}
+}

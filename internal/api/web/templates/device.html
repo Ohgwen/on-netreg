@@ -65,14 +65,14 @@
   </td>
 </tr>
 {{else}}
-<tr><td colspan="2" class="empty">No aliases. An alias is an extra name that points at {{.Device.EffectiveHostname}}.</td></tr>
+<tr><td colspan="2" class="empty">No aliases. An alias is an extra name that points at {{.Device.EffectiveHostname}}. Enter a bare name for this device's zone, or a full domain name to place it in another zone.</td></tr>
 {{end}}
 </tbody>
 </table>
 {{if not .Device.IdentityID}}
 <form method="post" action="/devices/{{.Device.ID}}/aliases" class="inline">
   <label class="visually-hidden" for="alias-label">New alias</label>
-  <input type="text" id="alias-label" name="label" placeholder="e.g. printer" required autocomplete="off" spellcheck="false">
+  <input type="text" id="alias-label" name="label" placeholder="printer  or  printer.other-zone.example.com" size="34" required autocomplete="off" spellcheck="false">
   <button type="submit">Add alias</button>
 </form>
 {{end}}

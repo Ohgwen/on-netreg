@@ -12,7 +12,8 @@ import (
 )
 
 // syncAliases runs after devices and identities. Each DeviceAlias should
-// exist in DNS as a CNAME <label>.<zone> -> <hostname>.<zone> exactly while
+// exist in DNS as a CNAME <label>.<alias zone> -> <hostname>.<device zone>
+// (the alias zone is the device's own unless the alias pins another) exactly while
 // its device has a confirmed A record; otherwise it should not exist. The
 // alias row's Synced* fields say what is in DNS now, so any difference
 // between that and the desired state is resolved by removing the old CNAME
@@ -44,9 +45,13 @@ func (e *Engine) syncAliases(ctx context.Context, dns DNSClient, dnsCfg config.T
 		dev, found := deviceByID[a.DeviceID]
 
 		present := found && dev.DNSRecordSynced && !dev.Excluded && dev.Zone != ""
-		var name, target string
+		var name, target, zone string
 		if present {
-			name = fqdn(a.Label, dev.Zone)
+			zone = a.Zone
+			if zone == "" {
+				zone = dev.Zone
+			}
+			name = fqdn(a.Label, zone)
 			target = fqdn(dev.Hostname, dev.Zone)
 		}
 
@@ -80,7 +85,7 @@ func (e *Engine) syncAliases(ctx context.Context, dns DNSClient, dnsCfg config.T
 		if present && !a.Synced {
 			err := dns.AddRecord(ctx, technitium.AddRecordRequest{
 				Domain:    name,
-				Zone:      dev.Zone,
+				Zone:      zone,
 				Type:      "CNAME",
 				TTL:       dnsCfg.TTL,
 				CNAME:     target,
@@ -90,7 +95,7 @@ func (e *Engine) syncAliases(ctx context.Context, dns DNSClient, dnsCfg config.T
 			if err != nil {
 				a.LastSyncError = err.Error()
 			} else {
-				a.Synced, a.SyncedName, a.SyncedTarget, a.SyncedZone = true, name, target, dev.Zone
+				a.Synced, a.SyncedName, a.SyncedTarget, a.SyncedZone = true, name, target, zone
 			}
 		}
 		if err := e.DB.Save(a).Error; err != nil {

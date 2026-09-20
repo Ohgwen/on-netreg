@@ -220,3 +220,49 @@ func TestRegisterZoneOSDescription(t *testing.T) {
 		t.Errorf("blank zone should clear pin: %v %+v", err, dev)
 	}
 }
+
+func TestCreateAliasFQDN(t *testing.T) {
+	h, gdb := testHandlers(t)
+	h.CurrentUser = func(*http.Request) string { return "admin" }
+	h.DNS = func(context.Context) (DNSClient, error) {
+		return fakeZones{zones: []string{"lan.example.com", "example.com", "other.example.org"}}, nil
+	}
+	dev := db.Device{MAC: "aa:bb:cc:dd:ee:40", Hostname: "web1", Zone: "lan.example.com"}
+	gdb.Create(&dev)
+	r := httptest.NewRequest("POST", "/", nil)
+
+	cases := []struct {
+		in, label, zone string
+		ok              bool
+	}{
+		{"www", "www", "", true},
+		{"Blog.LAN.example.com.", "blog", "", true},       // device's own zone -> follows device
+		{"shop.example.com", "shop", "example.com", true}, // longest known suffix, pinned
+		{"a.b.other.example.org", "a.b", "other.example.org", true},
+		{"x.unknown.net", "", "", false},
+		{"lan.example.com", "", "", false}, // zone apex, no name
+		{"bad_name.example.com", "", "", false},
+	}
+	for _, c := range cases {
+		label, zone, err := h.parseAlias(r.Context(), dev, c.in)
+		if (err == nil) != c.ok || label != c.label || zone != c.zone {
+			t.Errorf("parseAlias(%q) = %q, %q, %v; want %q, %q, ok=%v", c.in, label, zone, err, c.label, c.zone, c.ok)
+		}
+	}
+
+	if _, err := h.createAlias(r, dev, "shop.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	var a db.DeviceAlias
+	gdb.Where("label = ?", "shop").First(&a)
+	if a.Zone != "example.com" {
+		t.Errorf("zone = %q", a.Zone)
+	}
+	// Same name in the device's own zone is a different FQDN, so allowed.
+	if _, err := h.createAlias(r, dev, "shop"); err != nil {
+		t.Errorf("same label in another zone rejected: %v", err)
+	}
+	if _, err := h.createAlias(r, dev, "shop.example.com"); err == nil {
+		t.Error("duplicate FQDN accepted")
+	}
+}
