@@ -93,7 +93,8 @@
     {{if .Blocked}}<span class="badge badge-error" title="Blocked by UniFi controller">blocked</span>{{end}}
   </td>
   <td>
-    {{if .IsFixedIP}}<span class="badge badge-muted">static</span>
+    {{if eq .AddressMode "static"}}<span class="badge badge-muted">static</span>
+    {{else if .IsFixedIP}}<span class="badge badge-muted">reserved</span>
     {{else if .LeaseEstimatedExpiry}}<span class="badge badge-muted" title="estimated from last seen + the network's configured DHCP lease time">DHCP · est. {{datetimePtr .LeaseEstimatedExpiry}}</span>
     {{else}}<span class="badge badge-muted">DHCP</span>{{end}}
   </td>

@@ -28,8 +28,9 @@
 {{if .Device.OS}}<tr><th>OS</th><td>{{.Device.OS}}</td></tr>{{end}}
 {{if .Device.Description}}<tr><th>Description</th><td>{{.Device.Description}}</td></tr>{{end}}
 <tr><th>IP address</th><td class="mono">{{.Device.IPAddress}}</td></tr>
-<tr><th>Lease</th><td>
-  {{if .Device.IsFixedIP}}<span class="badge badge-muted">static / fixed IP</span>
+<tr><th>Addressing</th><td>
+  {{if eq .Device.AddressMode "static"}}<span class="badge badge-muted">static</span>
+  {{else if .Device.IsFixedIP}}<span class="badge badge-muted">DHCP reserved</span>
   {{else if .Device.LeaseEstimatedExpiry}}<span class="badge badge-muted" title="estimated from last seen + the network's configured DHCP lease time">DHCP · estimated expiry {{datetimePtr .Device.LeaseEstimatedExpiry}}</span>
   {{else}}<span class="badge badge-muted">DHCP (lease time unknown)</span>{{end}}
 </td></tr>
@@ -97,6 +98,27 @@
 </tbody>
 </table>
 </div>
+
+<div class="section-head"><h2>UniFi name</h2></div>
+<form method="post" action="/devices/{{.Device.ID}}/push-name" class="card">
+  <p>Set this device's name in UniFi to <span class="mono">{{.Device.EffectiveHostname}}</span>{{if .Device.UniFiName}} (currently <span class="mono">{{.Device.UniFiName}}</span>){{end}}.</p>
+  <div class="actions"><button type="submit"{{if eq .Device.UniFiName .Device.EffectiveHostname}} disabled{{end}}>Push name to UniFi</button></div>
+</form>
+
+<div class="section-head"><h2>Addressing</h2></div>
+<form method="post" action="/devices/{{.Device.ID}}/addressing" class="card form-grid">
+  <label>Mode
+    <select name="mode">
+      <option value="dhcp"{{if eq .Device.AddressMode "dhcp"}} selected{{end}}>DHCP</option>
+      <option value="reserved"{{if eq .Device.AddressMode "reserved"}} selected{{end}}>DHCP reserved (fixed IP in UniFi)</option>
+      <option value="static"{{if eq .Device.AddressMode "static"}} selected{{end}}>Static (set on the device)</option>
+    </select>
+  </label>
+  <label>IP address (reserved or static)
+    <input type="text" name="ip" value="{{if .Device.AssignedIP}}{{.Device.AssignedIP}}{{else}}{{.Device.IPAddress}}{{end}}" placeholder="10.200.60.50" autocomplete="off" inputmode="decimal">
+  </label>
+  <div class="actions"><button type="submit">Save addressing</button></div>
+</form>
 
 <div class="section-head"><h2>History</h2></div>
 <div class="table-wrap">

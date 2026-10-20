@@ -568,3 +568,51 @@ func TestReconcileZoneOverrideBeatsNetworkZone(t *testing.T) {
 		t.Errorf("expected move to pinned zone, got %+v", res.Changes)
 	}
 }
+
+func TestReconcileStaticDeviceKeepsAssignedIP(t *testing.T) {
+	now := time.Now()
+	existing := []db.Device{{
+		MAC:             "aa:bb:cc:dd:ee:01",
+		Hostname:        "laptop",
+		Zone:            testZone,
+		IPAddress:       "192.168.1.10",
+		AddressMode:     db.AddressStatic,
+		AssignedIP:      "192.168.1.10",
+		DNSRecordSynced: true,
+		LastSeen:        now.Add(-time.Minute),
+	}}
+	// UniFi reports no address at all (e.g. only seen via /stat/alluser).
+	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client.IP = ""
+
+	result := Reconcile(now, 1, existing, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
+
+	if len(result.Changes) != 0 {
+		t.Fatalf("expected static device's record left alone, got %+v", result.Changes)
+	}
+	dev := result.Devices[0]
+	if dev.IPAddress != "192.168.1.10" || dev.AddressMode != db.AddressStatic {
+		t.Errorf("got IP %q mode %q, want 192.168.1.10 static", dev.IPAddress, dev.AddressMode)
+	}
+}
+
+func TestReconcileMirrorsUnifiReservation(t *testing.T) {
+	now := time.Now()
+	client := makeClient("aa:bb:cc:dd:ee:01", "Laptop", "")
+	client.IsFixedIP = true
+
+	result := Reconcile(now, 1, nil, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
+
+	dev := result.Devices[0]
+	if dev.AddressMode != db.AddressReserved || dev.AssignedIP != client.IP {
+		t.Fatalf("got mode %q assigned %q, want reserved %s", dev.AddressMode, dev.AssignedIP, client.IP)
+	}
+
+	// Reservation removed in UniFi: the device drops back to DHCP.
+	client.IsFixedIP = false
+	result = Reconcile(now, 1, result.Devices, []unifi.NetworkClient{client}, testDNSConfig, fixedZone(testZone), nil)
+	dev = result.Devices[0]
+	if dev.AddressMode != db.AddressDHCP || dev.AssignedIP != "" {
+		t.Fatalf("got mode %q assigned %q, want dhcp with no assigned IP", dev.AddressMode, dev.AssignedIP)
+	}
+}

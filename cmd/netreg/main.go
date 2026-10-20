@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -126,10 +127,24 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 		logger.Info("ldap.url not set; assigning devices to users is disabled")
 	}
 
+	unifiWriterFactory := func(ctx context.Context, controllerID uint) (handlers.UnifiWriter, error) {
+		controllers, err := settings.LoadControllers(gdb, secretKey)
+		if err != nil {
+			return nil, err
+		}
+		for _, ctrl := range controllers {
+			if ctrl.ID == controllerID {
+				return unifi.New(ctrl.Config)
+			}
+		}
+		return nil, fmt.Errorf("unifi controller %d not found or disabled", controllerID)
+	}
+
 	h := &handlers.Handlers{
 		DB:          gdb,
 		Engine:      engine,
 		DNS:         dnsClientFactory,
+		Unifi:       unifiWriterFactory,
 		Pages:       pages,
 		Logger:      logger,
 		CurrentUser: currentUser,

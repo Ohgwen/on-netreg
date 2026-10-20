@@ -65,10 +65,24 @@ type DNSClient interface {
 // edits rather than what was configured at process start.
 type DNSClientFactory func(ctx context.Context) (DNSClient, error)
 
+// UnifiWriter is the subset of the UniFi client used to write a device's
+// settings back to its controller: its DHCP reservation (fixed IP) and its
+// client alias.
+type UnifiWriter interface {
+	SetFixedIP(ctx context.Context, mac, ip, networkID string) error
+	ClearFixedIP(ctx context.Context, mac string) error
+	SetName(ctx context.Context, mac, name string) error
+}
+
+// UnifiWriterFactory builds a UnifiWriter for the UniFi controller with the
+// given ID, from the connection currently stored in the DB.
+type UnifiWriterFactory func(ctx context.Context, controllerID uint) (UnifiWriter, error)
+
 type Handlers struct {
 	DB          *gorm.DB
 	Engine      Engine
 	DNS         DNSClientFactory
+	Unifi       UnifiWriterFactory
 	Pages       map[string]*template.Template
 	Logger      *slog.Logger
 	CurrentUser func(*http.Request) string
@@ -141,6 +155,8 @@ func (h *Handlers) Routes() http.Handler {
 	mux.HandleFunc("POST /sync", h.triggerSync)
 	mux.HandleFunc("GET /devices/{id}", h.deviceDetail)
 	mux.HandleFunc("POST /devices/{id}/override", h.setOverride)
+	mux.HandleFunc("POST /devices/{id}/addressing", h.setAddressing)
+	mux.HandleFunc("POST /devices/{id}/push-name", h.pushName)
 	mux.HandleFunc("POST /devices/{id}/exclude", h.toggleExclude)
 	mux.HandleFunc("POST /devices/{id}/forget", h.forgetDevice)
 	mux.HandleFunc("POST /devices/bulk", h.bulkAction)

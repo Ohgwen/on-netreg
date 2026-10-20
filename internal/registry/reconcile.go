@@ -98,6 +98,12 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 			zone = existingDevice.ZoneOverride
 		}
 
+		// A static device configures its own address, so DNS follows the
+		// address registered for it rather than whatever UniFi last saw.
+		if found && existingDevice.AddressMode == db.AddressStatic && HasValidIP(existingDevice.AssignedIP) {
+			client.IP = existingDevice.AssignedIP
+		}
+
 		hasValidIP := HasValidIP(client.IP)
 
 		if found && (existingDevice.Excluded || skipDNS[client.MAC]) {
@@ -111,6 +117,7 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 			applyConnectionDetails(&dev, client)
 			dev.NetworkID = info.NetworkID
 			dev.IsFixedIP = client.IsFixedIP
+			applyAddressMode(&dev, client)
 			dev.LeaseEstimatedExpiry = estimateLeaseExpiry(now, client.IsFixedIP, info.LeaseSeconds)
 			dev.LastSeen = now
 			if dev.FirstSeen.IsZero() {
@@ -152,6 +159,7 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 				Excluded:             private,
 			}
 			applyConnectionDetails(&dev, client)
+			applyAddressMode(&dev, client)
 			// A client with no valid IP yet (still negotiating DHCP, or
 			// disconnected) is tracked for visibility but never gets a DNS
 			// record until it actually has an address. Identity members are
@@ -247,6 +255,7 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 		applyConnectionDetails(&dev, client)
 		dev.NetworkID = info.NetworkID
 		dev.IsFixedIP = client.IsFixedIP
+		applyAddressMode(&dev, client)
 		dev.LeaseEstimatedExpiry = estimateLeaseExpiry(now, client.IsFixedIP, info.LeaseSeconds)
 		// Once a record is taken down for having no valid address, don't
 		// keep showing the stale IP as if it were still current.
@@ -281,6 +290,23 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 	}
 
 	return result
+}
+
+// applyAddressMode mirrors UniFi's fixed-IP setting onto a non-static
+// device: a client with a UniFi reservation is AddressReserved at that
+// address, anything else is AddressDHCP. Static devices are left alone --
+// only netreg sets or clears that mode.
+func applyAddressMode(dev *db.Device, client unifi.NetworkClient) {
+	if dev.AddressMode == db.AddressStatic {
+		return
+	}
+	if client.IsFixedIP {
+		dev.AddressMode = db.AddressReserved
+		dev.AssignedIP = client.IP
+		return
+	}
+	dev.AddressMode = db.AddressDHCP
+	dev.AssignedIP = ""
 }
 
 // HasValidIP reports whether ip is a non-empty, parseable IP address.

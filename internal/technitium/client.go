@@ -168,7 +168,23 @@ func (c *Client) AddRecord(ctx context.Context, r AddRecordRequest) error {
 	return err
 }
 
+// UpdateRecord updates an existing record. If r.IPAddress is empty for an
+// address record (the registry lost track of the device's last IP), the
+// record's current value is looked up first, since Technitium requires it to
+// identify which A/AAAA record to update. If that lookup doesn't find exactly
+// one record, any records at the old name are replaced with a fresh one.
 func (c *Client) UpdateRecord(ctx context.Context, r UpdateRecordRequest) error {
+	if r.IPAddress == "" && isAddressType(r.Type) {
+		current, err := c.currentAddresses(ctx, r.Domain, r.Zone, r.Type)
+		if err != nil {
+			return err
+		}
+		if len(current) != 1 {
+			return c.replaceRecord(ctx, r, current)
+		}
+		r.IPAddress = current[0]
+	}
+
 	q := url.Values{
 		"domain": {r.Domain},
 		"zone":   {r.Zone},
@@ -194,7 +210,25 @@ func (c *Client) UpdateRecord(ctx context.Context, r UpdateRecordRequest) error 
 	return err
 }
 
+// DeleteRecord removes a record. If r.IPAddress is empty for an address
+// record, every A/AAAA record of that type at r.Domain is looked up and
+// deleted, since Technitium requires the value to identify which one to
+// remove. Finding none is not an error: the record is already gone.
 func (c *Client) DeleteRecord(ctx context.Context, r DeleteRecordRequest) error {
+	if r.IPAddress == "" && isAddressType(r.Type) {
+		current, err := c.currentAddresses(ctx, r.Domain, r.Zone, r.Type)
+		if err != nil {
+			return err
+		}
+		for _, ip := range current {
+			r.IPAddress = ip
+			if err := c.DeleteRecord(ctx, r); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
 	q := url.Values{
 		"domain": {r.Domain},
 		"zone":   {r.Zone},
@@ -229,6 +263,58 @@ func (c *Client) GetRecords(ctx context.Context, domain, zone string, listZone b
 		return nil, fmt.Errorf("decoding get-records response: %w", err)
 	}
 	return resp.Response.Records, nil
+}
+
+// currentAddresses returns the values of the recordType (A or AAAA) records
+// that exist at exactly domain.
+func (c *Client) currentAddresses(ctx context.Context, domain, zone, recordType string) ([]string, error) {
+	records, err := c.GetRecords(ctx, domain, zone, false)
+	if err != nil {
+		return nil, fmt.Errorf("looking up current %s records for %s: %w", recordType, domain, err)
+	}
+	want := strings.TrimSuffix(domain, ".")
+	var ips []string
+	for _, rec := range records {
+		if !strings.EqualFold(rec.Type, recordType) || !strings.EqualFold(strings.TrimSuffix(rec.Name, "."), want) {
+			continue
+		}
+		if ip, ok := rec.RData["ipAddress"].(string); ok && ip != "" {
+			ips = append(ips, ip)
+		}
+	}
+	return ips, nil
+}
+
+// replaceRecord applies an update whose current value is ambiguous (zero or
+// several records at the old name) by deleting whatever is there and adding
+// the desired record.
+func (c *Client) replaceRecord(ctx context.Context, r UpdateRecordRequest, current []string) error {
+	ip := r.NewIPAddress
+	if ip == "" {
+		return fmt.Errorf("cannot replace %s record for %s: no current or new address", r.Type, r.Domain)
+	}
+	for _, old := range current {
+		if err := c.DeleteRecord(ctx, DeleteRecordRequest{Domain: r.Domain, Zone: r.Zone, Type: r.Type, IPAddress: old}); err != nil {
+			return err
+		}
+	}
+	domain := r.NewDomain
+	if domain == "" {
+		domain = r.Domain
+	}
+	return c.AddRecord(ctx, AddRecordRequest{
+		Domain:    domain,
+		Zone:      r.Zone,
+		Type:      r.Type,
+		TTL:       r.NewTTL,
+		IPAddress: ip,
+		Overwrite: true,
+		Comments:  r.Comments,
+	})
+}
+
+func isAddressType(recordType string) bool {
+	return strings.EqualFold(recordType, "A") || strings.EqualFold(recordType, "AAAA")
 }
 
 // ListZones returns every zone hosted on the server.

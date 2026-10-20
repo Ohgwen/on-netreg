@@ -55,9 +55,19 @@ type Device struct {
 	// record.
 	Zone string
 
-	// IsFixedIP reflects whether UniFi reports this client with a static
-	// IP assignment, as opposed to a DHCP-leased one.
+	// IsFixedIP reflects whether UniFi reports this client with a fixed-IP
+	// DHCP reservation, as opposed to a dynamically leased address.
 	IsFixedIP bool
+
+	// AddressMode is how this device gets its address. Reserved and DHCP
+	// mirror UniFi's fixed-IP setting every sync (UniFi is the source of
+	// truth for reservations); Static is set only from netreg and means the
+	// device configures AssignedIP itself, so DNS uses it regardless of what
+	// UniFi reports.
+	AddressMode AddressMode `gorm:"size:16;not null;default:dhcp"`
+	// AssignedIP is the reserved (AddressReserved) or self-configured
+	// (AddressStatic) address. Empty for AddressDHCP.
+	AssignedIP string `gorm:"size:45"`
 	// LeaseEstimatedExpiry is a best-effort estimate (LastSeen + the
 	// client's network's configured DHCP lease time) for dynamic clients.
 	// UniFi's local API does not reliably expose the true lease expiry, so
@@ -144,6 +154,28 @@ type DeviceAlias struct {
 	CreatedAt time.Time
 }
 
+// AddressMode is how a device is addressed: a dynamic DHCP lease, a DHCP
+// reservation (UniFi fixed IP), or a static address set on the device.
+type AddressMode string
+
+const (
+	AddressDHCP     AddressMode = "dhcp"
+	AddressReserved AddressMode = "reserved"
+	AddressStatic   AddressMode = "static"
+)
+
+// Label is the human-readable name of the mode for templates.
+func (m AddressMode) Label() string {
+	switch m {
+	case AddressReserved:
+		return "DHCP reserved"
+	case AddressStatic:
+		return "Static"
+	default:
+		return "DHCP"
+	}
+}
+
 type SyncEventAction string
 
 const (
@@ -159,6 +191,8 @@ const (
 	SyncEventInclude        SyncEventAction = "include"
 	SyncEventForget         SyncEventAction = "forget"
 	SyncEventManualSync     SyncEventAction = "manual_sync"
+	SyncEventAddressing     SyncEventAction = "addressing"
+	SyncEventPushName       SyncEventAction = "push_name"
 	SyncEventSettingsChange SyncEventAction = "settings_change"
 	SyncEventRegister       SyncEventAction = "register"
 	SyncEventAssign         SyncEventAction = "assign"
