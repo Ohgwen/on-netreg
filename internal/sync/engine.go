@@ -202,6 +202,7 @@ func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRun
 	if err := q.Find(&existing).Error; err != nil {
 		return fmt.Errorf("loading existing devices: %w", err)
 	}
+	seen, existing = claimableClients(ctrl.ID, seen, existing)
 
 	defaultZone := ctrl.DefaultZone
 	if defaultZone == "" {
@@ -244,6 +245,43 @@ func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRun
 	}
 
 	return e.persist(result.Devices)
+}
+
+// claimableClients drops the clients (and their device rows) that belong
+// to another controller and that this controller only knows historically.
+// A controller's known-client list (/stat/alluser) keeps every MAC it has
+// ever seen, usually with no IP, so a device that once visited this site
+// but now lives on another would otherwise be reconciled here as
+// "no address": its record deleted, then re-created by its own
+// controller's pass, every cycle. A device moves to this controller only
+// once it's actually connected here.
+func claimableClients(controllerID uint, seen []unifi.NetworkClient, existing []db.Device) ([]unifi.NetworkClient, []db.Device) {
+	foreign := make(map[string]bool)
+	for _, d := range existing {
+		if d.ControllerID != 0 && d.ControllerID != controllerID {
+			foreign[d.MAC] = true
+		}
+	}
+	if len(foreign) == 0 {
+		return seen, existing
+	}
+
+	dropped := make(map[string]bool)
+	keptSeen := make([]unifi.NetworkClient, 0, len(seen))
+	for _, c := range seen {
+		if foreign[c.MAC] && !c.Online {
+			dropped[c.MAC] = true
+			continue
+		}
+		keptSeen = append(keptSeen, c)
+	}
+	keptExisting := make([]db.Device, 0, len(existing))
+	for _, d := range existing {
+		if !dropped[d.MAC] {
+			keptExisting = append(keptExisting, d)
+		}
+	}
+	return keptSeen, keptExisting
 }
 
 type applyOutcome struct {

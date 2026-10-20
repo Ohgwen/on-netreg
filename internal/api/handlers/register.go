@@ -264,7 +264,14 @@ func (h *Handlers) registerDevice(ctx context.Context, actor string, in register
 		dev.ZoneOverride = zone
 		dev.OS = osName
 		dev.Description = desc
-		dev.Hostname = hostname
+		// Hostname is the name currently published in DNS, so for a known
+		// device it must keep the old value: reconcile detects the rename by
+		// comparing the override against it, then updates the record in place
+		// (or, for a zone change, deletes the old name). Overwriting it here
+		// would hide the rename and orphan the old record.
+		if !existed {
+			dev.Hostname = hostname
+		}
 		dev.OverrideHostname = &hostname
 		dev.Excluded = false
 		dev.Registered = true
@@ -272,9 +279,7 @@ func (h *Handlers) registerDevice(ctx context.Context, actor string, in register
 		if owner != nil {
 			applyOwner(&dev, *owner)
 		}
-		// DNSRecordSynced is left alone on purpose: for a device that already
-		// has a record, the next reconcile sees the hostname change and
-		// updates that record in place instead of leaving the old name behind.
+		// DNSRecordSynced is left alone on purpose, for the same reason.
 		if err := tx.Save(&dev).Error; err != nil {
 			return err
 		}

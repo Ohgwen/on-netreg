@@ -10,13 +10,16 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
 	"github.com/Ohgwen/on-netreg/internal/config"
 	"github.com/Ohgwen/on-netreg/internal/db"
 	"github.com/Ohgwen/on-netreg/internal/directory"
+	"github.com/Ohgwen/on-netreg/internal/registry"
 	"github.com/Ohgwen/on-netreg/internal/technitium"
+	"github.com/Ohgwen/on-netreg/internal/unifi"
 )
 
 type fakeDirectory struct{ users map[string]directory.User }
@@ -264,5 +267,31 @@ func TestCreateAliasFQDN(t *testing.T) {
 	}
 	if _, err := h.createAlias(r, dev, "shop.example.com"); err == nil {
 		t.Error("duplicate FQDN accepted")
+	}
+}
+
+// Re-registering a device that already has a DNS record must leave the
+// reconcile able to see the rename, so the record is renamed rather than
+// left under the old name with the device marked synced.
+func TestRegisterRenameIsAppliedByReconcile(t *testing.T) {
+	h, gdb := testHandlers(t)
+	seen := db.Device{MAC: "aa:bb:cc:dd:ee:20", Hostname: "pgsql-01", Zone: "infra.example.com", ControllerID: 1,
+		DNSRecordSynced: true, IPAddress: "10.0.0.11", FirstSeen: time.Now(), LastSeen: time.Now()}
+	if err := gdb.Create(&seen).Error; err != nil {
+		t.Fatal(err)
+	}
+	dev, _, err := h.registerDevice(context.Background(), "admin", registerInput{MAC: seen.MAC, Hostname: "on-db-01", Zone: "infra.example.com"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := unifi.NetworkClient{MAC: seen.MAC, IP: "10.0.0.11", Online: true}
+	res := registry.Reconcile(time.Now(), 1, []db.Device{dev}, []unifi.NetworkClient{client},
+		config.DNSConfig{FallbackPattern: "{vendor}-{macsuffix}"},
+		func(unifi.NetworkClient) registry.NetworkInfo { return registry.NetworkInfo{Zone: "infra.example.com"} }, nil)
+
+	if len(res.Changes) != 1 || res.Changes[0].Kind != registry.ChangeUpdate ||
+		res.Changes[0].PreviousHostname != "pgsql-01" || res.Changes[0].Hostname != "on-db-01" {
+		t.Fatalf("changes = %+v, want one update pgsql-01 -> on-db-01", res.Changes)
 	}
 }

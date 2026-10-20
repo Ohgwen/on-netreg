@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -288,5 +289,48 @@ func TestRunOnceNoOpWithNoControllers(t *testing.T) {
 	}
 	if len(dns.addCalls) != 0 {
 		t.Errorf("expected no DNS calls with no controllers configured")
+	}
+}
+
+// A device that lives on one controller but is still in another
+// controller's historical client list (offline, no IP) must not have its
+// record deleted by that other controller's pass every cycle.
+func TestRunOnceIgnoresOtherControllersHistoricalClient(t *testing.T) {
+	gdb := testDB(t)
+	seedAppSettings(t, gdb)
+	seedTechnitium(t, gdb)
+	home := seedController(t, gdb, "lan.example.com")
+	knox := db.UnifiController{Name: "knox", BaseURL: "https://knox.local", Site: "default", DefaultZone: "lan.example.com", Enabled: true}
+	if err := gdb.Create(&knox).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	const mac = "10:bb:cc:dd:ee:09"
+	dev := db.Device{MAC: mac, Hostname: "tablet", Zone: "lan.example.com", ControllerID: knox.ID,
+		IPAddress: "10.3.0.5", DNSRecordSynced: true, FirstSeen: time.Now(), LastSeen: time.Now()}
+	if err := gdb.Create(&dev).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	clients := map[string]fakeUnifi{
+		home.BaseURL: {clients: []unifi.NetworkClient{{MAC: mac, Name: "tablet"}}},                               // historical, no IP
+		knox.BaseURL: {clients: []unifi.NetworkClient{{MAC: mac, Name: "tablet", IP: "10.3.0.5", Online: true}}}, // connected here
+	}
+	dns := &fakeDNS{}
+	e := newTestEngine(gdb, dns, nil)
+	e.NewUnifiClient = func(c config.UnifiConfig) (UnifiClient, error) { return clients[c.BaseURL], nil }
+
+	for i := 0; i < 2; i++ {
+		if err := e.RunOnce(context.Background()); err != nil {
+			t.Fatalf("RunOnce: %v", err)
+		}
+	}
+	if len(dns.deleteCalls) != 0 || len(dns.addCalls) != 0 || len(dns.updateCalls) != 0 {
+		t.Fatalf("expected no DNS churn, got deletes=%d adds=%d updates=%d", len(dns.deleteCalls), len(dns.addCalls), len(dns.updateCalls))
+	}
+	var got db.Device
+	gdb.Where("mac = ?", mac).First(&got)
+	if got.ControllerID != knox.ID || !got.DNSRecordSynced {
+		t.Errorf("device = controller %d synced %v, want knox and synced", got.ControllerID, got.DNSRecordSynced)
 	}
 }
