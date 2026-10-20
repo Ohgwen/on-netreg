@@ -15,6 +15,14 @@
     </label>
     <label>Operating system (optional) <input type="text" name="os" value="{{.FormOS}}" maxlength="100" placeholder="e.g. Windows 11, iOS 18" autocomplete="off"></label>
     <label>Description (optional) <textarea name="description" rows="3" maxlength="500" placeholder="What is it, where is it, who is it for?">{{.FormDesc}}</textarea></label>
+    <label>Addressing
+      <select name="mode">
+        <option value="dhcp"{{if or (eq .FormMode "dhcp") (eq .FormMode "")}} selected{{end}}>DHCP</option>
+        <option value="reserved"{{if eq .FormMode "reserved"}} selected{{end}}>DHCP reserved (fixed IP in UniFi)</option>
+        <option value="static"{{if eq .FormMode "static"}} selected{{end}}>Static (set on the device)</option>
+      </select>
+    </label>
+    <label>IP address (reserved or static only) <input type="text" name="ip" value="{{.FormIP}}" placeholder="10.200.60.50" autocomplete="off" inputmode="decimal" spellcheck="false"></label>
     {{if .LDAPEnabled}}
     <label>Assign to user (optional)
       <input type="text" name="owner" value="{{.FormOwner}}" list="owner-options" data-user-search autocomplete="off">

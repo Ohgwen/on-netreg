@@ -37,6 +37,9 @@ func (h *Handlers) registerRoutes(mux *http.ServeMux) {
 // registerInput is the register form's fields, as entered.
 type registerInput struct {
 	MAC, Hostname, Zone, OS, Description, Owner string
+	// Mode and IP are the requested addressing (see changeAddressing); a
+	// blank Mode leaves the device's addressing as it is.
+	Mode, IP string
 }
 
 func inputFromForm(r *http.Request) registerInput {
@@ -47,6 +50,8 @@ func inputFromForm(r *http.Request) registerInput {
 		OS:          r.FormValue("os"),
 		Description: r.FormValue("description"),
 		Owner:       r.FormValue("owner"),
+		Mode:        r.FormValue("mode"),
+		IP:          r.FormValue("ip"),
 	}
 }
 
@@ -60,6 +65,8 @@ func (h *Handlers) formPage(ctx context.Context, in registerInput, formErr strin
 		FormOS:    in.OS,
 		FormDesc:  in.Description,
 		FormOwner: in.Owner,
+		FormMode:  in.Mode,
+		FormIP:    in.IP,
 		FormError: formErr,
 		RegZones:  h.zoneChoices(ctx),
 	}
@@ -79,6 +86,8 @@ func (h *Handlers) registerForm(w http.ResponseWriter, r *http.Request) {
 				OS:          dev.OS,
 				Description: dev.Description,
 				Owner:       dev.OwnerUsername,
+				Mode:        string(dev.AddressMode),
+				IP:          dev.AssignedIP,
 			}
 		}
 	}
@@ -175,6 +184,15 @@ func (h *Handlers) registerSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	flash := fmt.Sprintf("Registered %s as %s. It gets its DNS record when it first connects.", dev.MAC, dev.EffectiveHostname())
+	if mode := db.AddressMode(in.Mode); addressingChanged(dev, mode, in.IP) {
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		var msg string
+		if dev, msg, err = h.changeAddressing(ctx, r, dev, mode, in.IP); err != nil {
+			msg = "Addressing not changed: " + err.Error()
+		}
+		flash += " " + msg
+	}
 	if existed {
 		flash = fmt.Sprintf("Updated %s: now %s.", dev.MAC, dev.EffectiveHostname())
 		// Already known to a controller: push the changed record to DNS now
@@ -212,6 +230,9 @@ func (h *Handlers) registerDevice(ctx context.Context, actor string, in register
 	osName, desc := strings.TrimSpace(in.OS), strings.TrimSpace(in.Description)
 	if len([]rune(osName)) > 100 || len([]rune(desc)) > 500 {
 		return db.Device{}, false, inputError("OS is limited to 100 characters and the description to 500.")
+	}
+	if err := h.precheckAddressing(mac, in); err != nil {
+		return db.Device{}, false, err
 	}
 	var owner *directory.User
 	if strings.TrimSpace(in.Owner) != "" {
@@ -278,6 +299,43 @@ func (h *Handlers) registerDevice(ctx context.Context, actor string, in register
 		return db.Device{}, false, err
 	}
 	return dev, existed, nil
+}
+
+// precheckAddressing rejects requested addressing that can't be applied,
+// before anything is saved, so the form can be corrected and resubmitted.
+func (h *Handlers) precheckAddressing(mac string, in registerInput) error {
+	mode := db.AddressMode(in.Mode)
+	switch mode {
+	case "", db.AddressDHCP:
+		return nil
+	case db.AddressReserved, db.AddressStatic:
+	default:
+		return inputError("Choose DHCP, DHCP reserved or static addressing.")
+	}
+
+	dev := db.Device{MAC: mac}
+	if err := h.DB.Where("mac = ?", mac).First(&dev).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	if mode == db.AddressReserved && (dev.ControllerID == 0 || dev.NetworkID == nil) {
+		return inputError("A DHCP reservation needs to know the device's UniFi network, so the device must connect once first. Register it as DHCP or static for now, then reserve its address from the device page.")
+	}
+	if err := h.validateAssignedIP(dev, mode, in.IP); err != nil {
+		return inputError(err.Error())
+	}
+	return nil
+}
+
+// addressingChanged reports whether mode/ip (from a form; a blank mode
+// means "leave as is") differs from dev's current addressing.
+func addressingChanged(dev db.Device, mode db.AddressMode, ip string) bool {
+	if mode == "" {
+		return false
+	}
+	if mode != dev.AddressMode {
+		return true
+	}
+	return mode != db.AddressDHCP && ip != dev.AssignedIP
 }
 
 func zoneLabel(z string) string {

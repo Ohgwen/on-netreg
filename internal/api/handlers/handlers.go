@@ -138,6 +138,8 @@ type pageData struct {
 	FormZone    string
 	FormOS      string
 	FormDesc    string
+	FormMode    string
+	FormIP      string
 	RegZones    []string
 	FormError   string
 

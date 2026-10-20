@@ -33,23 +33,31 @@ func (h *Handlers) setAddressing(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/devices/"+strconv.FormatUint(uint64(dev.ID), 10)+"?flash="+url.QueryEscape(flash), http.StatusSeeOther)
 	}
 
-	mode := db.AddressMode(r.FormValue("mode"))
-	ip := r.FormValue("ip")
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	_, flash, err := h.changeAddressing(ctx, r, dev, db.AddressMode(r.FormValue("mode")), r.FormValue("ip"))
+	if err != nil {
+		flash = err.Error()
+	}
+	back(flash)
+}
 
+// changeAddressing validates and applies a new addressing mode to dev:
+// the UniFi reservation first (so a controller failure leaves netreg
+// unchanged), then the device row and an audit event. It returns the saved
+// device and a message for the admin; validation and UniFi failures are
+// inputErrors, safe to show on a form.
+func (h *Handlers) changeAddressing(ctx context.Context, r *http.Request, dev db.Device, mode db.AddressMode, ip string) (db.Device, string, error) {
 	if mode != db.AddressDHCP {
 		if err := h.validateAssignedIP(dev, mode, ip); err != nil {
-			back(err.Error())
-			return
+			return dev, "", inputError(err.Error())
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
 	if err := h.applyReservation(ctx, dev, mode, ip); err != nil {
 		h.Logger.Error("failed to update unifi reservation", "mac", dev.MAC, "mode", mode, "error", err)
 		h.logAudit(r, dev.MAC, db.SyncEventAddressing, fmt.Sprintf("set addressing to %s %s: %v", mode.Label(), ip, err), false)
-		back("UniFi update failed: " + err.Error())
-		return
+		return dev, "", inputError("UniFi update failed: " + err.Error())
 	}
 
 	dev.AddressMode = mode
@@ -59,8 +67,7 @@ func (h *Handlers) setAddressing(w http.ResponseWriter, r *http.Request) {
 	}
 	dev.IsFixedIP = mode == db.AddressReserved
 	if err := h.DB.Save(&dev).Error; err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return dev, "", err
 	}
 
 	detail := "set addressing to " + mode.Label()
@@ -69,11 +76,10 @@ func (h *Handlers) setAddressing(w http.ResponseWriter, r *http.Request) {
 	}
 	h.logAudit(r, dev.MAC, db.SyncEventAddressing, detail, true)
 
-	flash := "Saved. DNS updates on the next sync."
 	if mode == db.AddressReserved {
-		flash = "Reserved in UniFi. The device picks up the new address when it next renews its lease (reconnect it to apply now)."
+		return dev, "Reserved in UniFi. The device picks up the new address when it next renews its lease (reconnect it to apply now).", nil
 	}
-	back(flash)
+	return dev, "Saved. DNS updates on the next sync.", nil
 }
 
 // pushName sets the device's client alias on its UniFi controller to its
