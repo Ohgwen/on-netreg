@@ -170,7 +170,9 @@ a.button { display: inline-flex; align-items: center; background: var(--accent);
 a.button:hover { filter: brightness(1.1); }
 td input[data-user-search] { width: 10rem; }
 
-.flash { background: rgba(79,140,255,0.15); color: var(--accent); padding: 0.5rem 0.75rem; border-radius: 4px; }
+.flash { background: linear-gradient(rgba(79,140,255,0.15), rgba(79,140,255,0.15)), var(--bg); color: var(--accent); padding: 0.5rem 0.75rem; border-radius: 4px; }
+/* Stays in view when a redirect restores the page's scroll position. */
+.flash[role=status], .flash[role=alert] { position: sticky; top: 0.5rem; z-index: 10; }
 
 a { color: var(--accent); }
 

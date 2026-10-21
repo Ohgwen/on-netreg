@@ -343,3 +343,15 @@ func TestRunOnceIgnoresOtherControllersHistoricalClient(t *testing.T) {
 		t.Errorf("device = controller %d synced %v, want knox and synced", got.ControllerID, got.DNSRecordSynced)
 	}
 }
+
+// Kick must never block, and requests made while a cycle is queued
+// coalesce into one.
+func TestKickCoalesces(t *testing.T) {
+	e := &Engine{}
+	for i := 0; i < 5; i++ {
+		e.Kick()
+	}
+	if n := len(e.kickChan()); n != 1 {
+		t.Fatalf("queued kicks = %d, want 1", n)
+	}
+}

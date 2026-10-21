@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Ohgwen/on-netreg/internal/api/auth"
+	"github.com/Ohgwen/on-netreg/internal/api/compress"
 	"github.com/Ohgwen/on-netreg/internal/api/handlers"
 	"github.com/Ohgwen/on-netreg/internal/api/web"
 	"github.com/Ohgwen/on-netreg/internal/config"
@@ -173,7 +174,7 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 
 	srv := &http.Server{
 		Addr:    cfg.Server.ListenAddr,
-		Handler: mux,
+		Handler: compress.Gzip(mux),
 	}
 
 	serveErr := make(chan error, 1)

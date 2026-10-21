@@ -198,15 +198,11 @@ func (h *Handlers) registerSubmit(w http.ResponseWriter, r *http.Request) {
 		// Already known to a controller: push the changed record to DNS now
 		// instead of waiting for the next poll.
 		if dev.ControllerID != 0 {
-			ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-			defer cancel()
-			if err := h.Engine.RunOnce(ctx); err != nil {
-				h.Logger.Error("sync after register failed", "mac", dev.MAC, "error", err)
-				flash += " Sync failed: " + err.Error()
-			}
+			h.Engine.Kick()
+			flash += " DNS updates within a few seconds."
 		}
 	}
-	http.Redirect(w, r, "/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+	http.Redirect(w, r, deviceURL(dev)+"?flash="+url.QueryEscape(flash), http.StatusSeeOther)
 }
 
 // registerDevice creates a device for mac (which may never have connected)

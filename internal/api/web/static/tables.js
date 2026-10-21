@@ -22,6 +22,14 @@
     var sortState = { index: -1, dir: 1 };
     var page = 1;
 
+    // Page, page size, sort and scroll position survive the round trip of
+    // submitting a row's form and being redirected back, so an edit doesn't
+    // dump you on page 1. Kept per tab (sessionStorage) and per URL, so
+    // different filters/searches each remember their own place.
+    var viewKey = storageKey + ":view:" + location.pathname + stripFlash(location.search);
+    var saved = loadView();
+    if (saved.pageSize === "all" || [10, 20, 50, 100, 200].indexOf(saved.pageSize) >= 0) pageSize = saved.pageSize;
+
     var toolbar = document.createElement("div");
     toolbar.className = "dt-toolbar";
     container.insertBefore(toolbar, container.firstChild);
@@ -117,18 +125,7 @@
       h.setAttribute("aria-label", label + ", sort column");
 
       function sortBy() {
-        sortState.dir = sortState.index === idx ? -sortState.dir : 1;
-        sortState.index = idx;
-        headers.forEach(function (o) {
-          o.classList.remove("sort-asc", "sort-desc");
-          if (o.hasAttribute("aria-sort")) o.setAttribute("aria-sort", "none");
-        });
-        h.classList.add(sortState.dir === 1 ? "sort-asc" : "sort-desc");
-        h.setAttribute("aria-sort", sortState.dir === 1 ? "ascending" : "descending");
-        var type = h.dataset.sortType || "text";
-        allRows.sort(function (a, b) {
-          return sortState.dir * compareCells(a.cells[idx], b.cells[idx], type);
-        });
+        applySort(idx, sortState.index === idx ? -sortState.dir : 1);
         page = 1;
         render();
       }
@@ -141,6 +138,23 @@
         }
       });
     });
+
+    function applySort(idx, dir) {
+      var h = headers[idx];
+      if (!h || h.classList.contains("no-sort")) return;
+      sortState.dir = dir;
+      sortState.index = idx;
+      headers.forEach(function (o) {
+        o.classList.remove("sort-asc", "sort-desc");
+        if (o.hasAttribute("aria-sort")) o.setAttribute("aria-sort", "none");
+      });
+      h.classList.add(sortState.dir === 1 ? "sort-asc" : "sort-desc");
+      h.setAttribute("aria-sort", sortState.dir === 1 ? "ascending" : "descending");
+      var type = h.dataset.sortType || "text";
+      allRows.sort(function (a, b) {
+        return sortState.dir * compareCells(a.cells[idx], b.cells[idx], type);
+      });
+    }
 
     function compareCells(a, b, type) {
       var av = a ? a.textContent.trim() : "";
@@ -174,11 +188,16 @@
       var start = (page - 1) * sizeVal;
       var end = Math.min(start + sizeVal, allRows.length);
 
-      tbody.innerHTML = "";
+      // Rebuild the body in one fragment rather than row by row, so the
+      // browser lays the table out once.
+      var frag = document.createDocumentFragment();
       allRows.forEach(function (r, i) {
         r.style.display = i >= start && i < end ? "" : "none";
-        tbody.appendChild(r);
+        frag.appendChild(r);
       });
+      tbody.innerHTML = "";
+      tbody.appendChild(frag);
+      saveView();
 
       pager.innerHTML = "";
       var info = document.createElement("span");
@@ -234,6 +253,21 @@
       });
     }
 
+    function loadView() {
+      try {
+        return JSON.parse(sessionStorage.getItem(viewKey)) || {};
+      } catch (e) {
+        return {};
+      }
+    }
+    function saveView(extra) {
+      var v = { page: page, pageSize: pageSize, sortIndex: sortState.index, sortDir: sortState.dir };
+      if (extra) for (var k in extra) v[k] = extra[k];
+      try {
+        sessionStorage.setItem(viewKey, JSON.stringify(v));
+      } catch (e) {}
+    }
+
     function loadHiddenCols() {
       try {
         return JSON.parse(localStorage.getItem(storageKey + ":hidden")) || {};
@@ -247,7 +281,23 @@
       } catch (e) {}
     }
 
+    if (typeof saved.sortIndex === "number" && saved.sortIndex >= 0) applySort(saved.sortIndex, saved.sortDir === -1 ? -1 : 1);
+    if (saved.page > 0) page = saved.page;
     render();
+
+    // Remember where the page was scrolled when leaving it (a row's form
+    // submit, a link), and put it back after the redirect brings us here.
+    window.addEventListener("pagehide", function () { saveView({ scrollY: window.scrollY }); });
+    if (saved.scrollY > 0) window.scrollTo(0, saved.scrollY);
+  }
+
+  // stripFlash drops the one-shot ?flash= message so a page keeps the same
+  // remembered view with or without it.
+  function stripFlash(search) {
+    var params = new URLSearchParams(search);
+    params.delete("flash");
+    var s = params.toString();
+    return s ? "?" + s : "";
   }
 
   function initBulkBar() {

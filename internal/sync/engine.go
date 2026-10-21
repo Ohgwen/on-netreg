@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	stdsync "sync"
 	"time"
 
 	"gorm.io/gorm"
@@ -66,6 +67,28 @@ type Engine struct {
 	// LookupPTR reverse-resolves an address for RepairPTRs. Defaults to
 	// technitium.LookupPTR; overridable in tests.
 	LookupPTR func(ctx context.Context, dnsHost, ip string, timeout time.Duration) ([]string, error)
+
+	// runMu serializes sync cycles, so a manual "Sync now" never overlaps
+	// the background loop's cycle.
+	runMu stdsync.Mutex
+	// kick carries Kick requests to Run; buffered by one so requests made
+	// while a cycle is running coalesce into a single follow-up cycle.
+	kickOnce stdsync.Once
+	kick     chan struct{}
+}
+
+func (e *Engine) kickChan() chan struct{} {
+	e.kickOnce.Do(func() { e.kick = make(chan struct{}, 1) })
+	return e.kick
+}
+
+// Kick asks Run to start a sync cycle now instead of at the next tick, and
+// returns without waiting for it.
+func (e *Engine) Kick() {
+	select {
+	case e.kickChan() <- struct{}{}:
+	default: // a cycle is already queued
+	}
 }
 
 func (e *Engine) isAliveFunc() func(ip string) bool {
@@ -103,6 +126,8 @@ func (e *Engine) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			e.runOnceLogged(ctx)
+		case <-e.kickChan():
+			e.runOnceLogged(ctx)
 		}
 	}
 }
@@ -117,6 +142,9 @@ func (e *Engine) runOnceLogged(ctx context.Context) {
 // controller. One controller failing (e.g. unreachable) does not prevent
 // the others from syncing; their errors are joined and returned together.
 func (e *Engine) RunOnce(ctx context.Context) error {
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
+
 	appSettings, err := settings.LoadApp(e.DB)
 	if err != nil {
 		return fmt.Errorf("loading app settings: %w", err)

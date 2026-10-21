@@ -51,6 +51,9 @@ func newDeviceView(d db.Device, identityName string) deviceView {
 // Engine is the subset of sync.Engine the handlers depend on.
 type Engine interface {
 	RunOnce(ctx context.Context) error
+	// Kick asks for a sync cycle as soon as possible without waiting for
+	// it, so a change made in the UI reaches DNS within seconds.
+	Kick()
 	RepairPTRs(ctx context.Context) (netsync.PTRReport, error)
 }
 
@@ -511,7 +514,8 @@ func (h *Handlers) setOverride(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.logAudit(r, dev.MAC, db.SyncEventOverride, detail, true)
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	h.Engine.Kick()
+	redirectBack(w, r, "/", "")
 }
 
 func (h *Handlers) toggleExclude(w http.ResponseWriter, r *http.Request) {
@@ -523,7 +527,7 @@ func (h *Handlers) toggleExclude(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/", http.StatusSeeOther)
+	redirectBack(w, r, "/", "")
 }
 
 // setExcluded updates a device's Excluded flag and records the audit event.
@@ -603,7 +607,7 @@ func (h *Handlers) bulkAction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	flash := fmt.Sprintf("Bulk %s applied to %d device(s).", action, count)
-	http.Redirect(w, r, "/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+	redirectBack(w, r, "/", flash)
 }
 
 // forgetDevice removes a device from the registry entirely and, if it had a
@@ -618,7 +622,45 @@ func (h *Handlers) forgetDevice(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// The device's own page no longer exists, so only a listing is a
+	// sensible place to go back to.
+	if back := sameSiteReferer(r); back != "" && !strings.HasPrefix(back, deviceURL(dev)) {
+		redirectBack(w, r, "/", "")
+		return
+	}
 	http.Redirect(w, r, "/", http.StatusSeeOther)
+}
+
+// redirectBack sends the browser back to the page the form was submitted
+// from -- keeping the dashboard's filters and search -- with flash added,
+// or to fallback when there's no usable same-site Referer.
+func redirectBack(w http.ResponseWriter, r *http.Request, fallback, flash string) {
+	target := sameSiteReferer(r)
+	if target == "" {
+		target = fallback
+	}
+	u, err := url.Parse(target)
+	if err != nil {
+		u = &url.URL{Path: fallback}
+	}
+	q := u.Query()
+	q.Del("flash")
+	if flash != "" {
+		q.Set("flash", flash)
+	}
+	u.RawQuery = q.Encode()
+	http.Redirect(w, r, u.RequestURI(), http.StatusSeeOther)
+}
+
+// sameSiteReferer returns the path+query of the request's Referer when it
+// points at this same host, else "". Only a path is ever returned, so a
+// forged Referer can't redirect off-site.
+func sameSiteReferer(r *http.Request) string {
+	ref, err := url.Parse(r.Referer())
+	if err != nil || ref.Host != r.Host || !strings.HasPrefix(ref.Path, "/") || strings.HasPrefix(ref.Path, "//") {
+		return ""
+	}
+	return ref.RequestURI()
 }
 
 // forgetOne removes a device from the registry entirely and, if it had a

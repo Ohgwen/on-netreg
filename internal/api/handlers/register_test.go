@@ -18,9 +18,19 @@ import (
 	"github.com/Ohgwen/on-netreg/internal/db"
 	"github.com/Ohgwen/on-netreg/internal/directory"
 	"github.com/Ohgwen/on-netreg/internal/registry"
+	netsync "github.com/Ohgwen/on-netreg/internal/sync"
 	"github.com/Ohgwen/on-netreg/internal/technitium"
 	"github.com/Ohgwen/on-netreg/internal/unifi"
 )
+
+// fakeEngine counts sync requests instead of running them.
+type fakeEngine struct{ runs, kicks int }
+
+func (f *fakeEngine) RunOnce(ctx context.Context) error { f.runs++; return nil }
+func (f *fakeEngine) Kick()                             { f.kicks++ }
+func (f *fakeEngine) RepairPTRs(ctx context.Context) (netsync.PTRReport, error) {
+	return netsync.PTRReport{}, nil
+}
 
 type fakeDirectory struct{ users map[string]directory.User }
 
@@ -43,6 +53,7 @@ func testHandlers(t *testing.T) (*Handlers, *gorm.DB) {
 	}
 	return &Handlers{
 		DB:     gdb,
+		Engine: &fakeEngine{},
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Directory: fakeDirectory{users: map[string]directory.User{
 			"alice": {Username: "alice", Name: "Alice A", Email: "alice@example.com"},

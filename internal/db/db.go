@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -22,7 +23,7 @@ func Open(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	var dialector gorm.Dialector
 	switch cfg.Driver {
 	case "sqlite":
-		dialector = sqlite.Open(cfg.DSN)
+		dialector = sqlite.Open(sqliteDSN(cfg.DSN))
 	case "postgres":
 		dialector = postgres.Open(cfg.DSN)
 	default:
@@ -49,6 +50,33 @@ func Open(cfg config.DatabaseConfig) (*gorm.DB, error) {
 	}
 
 	return gdb, nil
+}
+
+// sqlitePragmas are applied to every pooled connection. WAL lets page
+// loads read while the sync loop's write transaction is open instead of
+// waiting for it; busy_timeout makes concurrent writers wait for the lock
+// rather than fail; synchronous=NORMAL is the recommended, still
+// crash-safe, setting under WAL. In-memory databases ignore journal_mode.
+var sqlitePragmas = []string{"journal_mode(WAL)", "busy_timeout(5000)", "synchronous(NORMAL)"}
+
+// sqliteDSN adds sqlitePragmas to dsn, leaving any pragma the DSN already
+// sets alone.
+func sqliteDSN(dsn string) string {
+	var extra []string
+	for _, p := range sqlitePragmas {
+		name := p[:strings.IndexByte(p, '(')]
+		if !strings.Contains(dsn, "_pragma="+name) {
+			extra = append(extra, "_pragma="+p)
+		}
+	}
+	if len(extra) == 0 {
+		return dsn
+	}
+	sep := "?"
+	if strings.Contains(dsn, "?") {
+		sep = "&"
+	}
+	return dsn + sep + strings.Join(extra, "&")
 }
 
 // Migrate applies schema migrations. AutoMigrate works unchanged across the

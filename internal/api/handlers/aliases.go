@@ -70,12 +70,7 @@ func (h *Handlers) addAlias(w http.ResponseWriter, r *http.Request) {
 	} else if dev.DNSRecordSynced {
 		// The device already has an A record: publish the CNAME now rather
 		// than on the next poll.
-		ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
-		defer cancel()
-		if err := h.Engine.RunOnce(ctx); err != nil {
-			h.Logger.Error("sync after adding alias failed", "mac", dev.MAC, "error", err)
-			flash += " Sync failed: " + err.Error()
-		}
+		h.Engine.Kick()
 	}
 	http.Redirect(w, r, deviceURL(dev)+"?flash="+url.QueryEscape(flash), http.StatusSeeOther)
 }

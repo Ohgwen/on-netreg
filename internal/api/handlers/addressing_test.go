@@ -66,6 +66,9 @@ func TestChangeAddressingReservesInUnifi(t *testing.T) {
 	if f.fixed[dev.MAC] != "10.0.0.50" {
 		t.Errorf("unifi reservation = %q, want 10.0.0.50", f.fixed[dev.MAC])
 	}
+	if k := h.Engine.(*fakeEngine).kicks; k != 1 {
+		t.Errorf("sync kicks = %d, want 1 so DNS updates right away", k)
+	}
 	var got db.Device
 	gdb.First(&got, dev.ID)
 	if got.AddressMode != db.AddressReserved || got.AssignedIP != "10.0.0.50" || !got.IsFixedIP {

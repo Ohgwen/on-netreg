@@ -75,11 +75,12 @@ func (h *Handlers) changeAddressing(ctx context.Context, r *http.Request, dev db
 		detail += " " + dev.AssignedIP
 	}
 	h.logAudit(r, dev.MAC, db.SyncEventAddressing, detail, true)
+	h.Engine.Kick()
 
 	if mode == db.AddressReserved {
 		return dev, "Reserved in UniFi. The device picks up the new address when it next renews its lease (reconnect it to apply now).", nil
 	}
-	return dev, "Saved. DNS updates on the next sync.", nil
+	return dev, "Saved. DNS updates within a few seconds.", nil
 }
 
 // pushName sets the device's client alias on its UniFi controller to its

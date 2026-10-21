@@ -35,6 +35,9 @@ type PTRReport struct {
 // records renamed before updates carried the PTR along, and any reverse
 // entry edited by hand.
 func (e *Engine) RepairPTRs(ctx context.Context) (PTRReport, error) {
+	e.runMu.Lock()
+	defer e.runMu.Unlock()
+
 	var report PTRReport
 
 	dnsCfg, err := settings.LoadTechnitium(e.DB, e.SecretKey)
