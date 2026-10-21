@@ -139,8 +139,12 @@ func (c *Client) rawRequest(ctx context.Context, path string, params url.Values)
 func (c *Client) AddRecord(ctx context.Context, r AddRecordRequest) error {
 	q := url.Values{
 		"domain": {r.Domain},
-		"zone":   {r.Zone},
 		"type":   {r.Type},
+	}
+	// Blank zone lets Technitium pick the closest authoritative zone, which
+	// is how PTR records find their reverse zone.
+	if r.Zone != "" {
+		q.Set("zone", r.Zone)
 	}
 	if r.TTL > 0 {
 		q.Set("ttl", strconv.Itoa(r.TTL))
@@ -150,6 +154,9 @@ func (c *Client) AddRecord(ctx context.Context, r AddRecordRequest) error {
 	}
 	if r.CNAME != "" {
 		q.Set("cname", r.CNAME)
+	}
+	if r.PTRName != "" {
+		q.Set("ptrName", r.PTRName)
 	}
 	if r.Overwrite {
 		q.Set("overwrite", "true")
@@ -201,6 +208,12 @@ func (c *Client) UpdateRecord(ctx context.Context, r UpdateRecordRequest) error 
 	}
 	if r.NewTTL > 0 {
 		q.Set("newTtl", strconv.Itoa(r.NewTTL))
+	}
+	if r.PTR {
+		q.Set("ptr", "true")
+	}
+	if r.CreatePTRZone {
+		q.Set("createPtrZone", "true")
 	}
 	if r.Comments != "" {
 		q.Set("comments", r.Comments)
@@ -303,14 +316,43 @@ func (c *Client) replaceRecord(ctx context.Context, r UpdateRecordRequest, curre
 		domain = r.Domain
 	}
 	return c.AddRecord(ctx, AddRecordRequest{
-		Domain:    domain,
-		Zone:      r.Zone,
-		Type:      r.Type,
-		TTL:       r.NewTTL,
-		IPAddress: ip,
-		Overwrite: true,
-		Comments:  r.Comments,
+		Domain:        domain,
+		Zone:          r.Zone,
+		Type:          r.Type,
+		TTL:           r.NewTTL,
+		IPAddress:     ip,
+		Overwrite:     true,
+		PTR:           r.PTR,
+		CreatePTRZone: r.CreatePTRZone,
+		Comments:      r.Comments,
 	})
+}
+
+// SetPTR points the reverse record for ip at name (an FQDN), replacing
+// whatever the reverse zone has there now. The reverse zone itself must
+// already exist on the server.
+func (c *Client) SetPTR(ctx context.Context, ip, name string, ttl int) error {
+	reverse, err := ReverseName(ip)
+	if err != nil {
+		return err
+	}
+	return c.AddRecord(ctx, AddRecordRequest{
+		Domain:    reverse,
+		Type:      "PTR",
+		TTL:       ttl,
+		PTRName:   name,
+		Overwrite: true,
+	})
+}
+
+// ReverseName returns the in-addr.arpa (IPv4) or ip6.arpa (IPv6) name for
+// ip, e.g. 10.200.55.0 -> 0.55.200.10.in-addr.arpa.
+func ReverseName(ip string) (string, error) {
+	name, err := dnsReverseAddr(ip)
+	if err != nil {
+		return "", fmt.Errorf("no reverse name for %q: %w", ip, err)
+	}
+	return strings.TrimSuffix(name, "."), nil
 }
 
 func isAddressType(recordType string) bool {

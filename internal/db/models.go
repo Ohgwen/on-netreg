@@ -193,6 +193,7 @@ const (
 	SyncEventManualSync     SyncEventAction = "manual_sync"
 	SyncEventAddressing     SyncEventAction = "addressing"
 	SyncEventPushName       SyncEventAction = "push_name"
+	SyncEventPTR            SyncEventAction = "ptr"
 	SyncEventSettingsChange SyncEventAction = "settings_change"
 	SyncEventRegister       SyncEventAction = "register"
 	SyncEventAssign         SyncEventAction = "assign"

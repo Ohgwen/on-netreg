@@ -31,6 +31,7 @@ type fakeDNS struct {
 	addCalls    []technitium.AddRecordRequest
 	updateCalls []technitium.UpdateRecordRequest
 	deleteCalls []technitium.DeleteRecordRequest
+	ptrCalls    map[string]string // ip -> name
 
 	addErr, updateErr, deleteErr error
 }
@@ -43,6 +44,14 @@ func (f *fakeDNS) AddRecord(ctx context.Context, r technitium.AddRecordRequest) 
 func (f *fakeDNS) UpdateRecord(ctx context.Context, r technitium.UpdateRecordRequest) error {
 	f.updateCalls = append(f.updateCalls, r)
 	return f.updateErr
+}
+
+func (f *fakeDNS) SetPTR(ctx context.Context, ip, name string, ttl int) error {
+	if f.ptrCalls == nil {
+		f.ptrCalls = map[string]string{}
+	}
+	f.ptrCalls[ip] = name
+	return nil
 }
 
 func (f *fakeDNS) DeleteRecord(ctx context.Context, r technitium.DeleteRecordRequest) error {

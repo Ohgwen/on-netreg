@@ -14,7 +14,9 @@ type AddRecordRequest struct {
 	Overwrite     bool
 	PTR           bool
 	CreatePTRZone bool
-	Comments      string
+	// PTRName is the target name of a PTR record (Type "PTR").
+	PTRName  string
+	Comments string
 }
 
 // UpdateRecordRequest updates an existing record, identified by
@@ -31,7 +33,11 @@ type UpdateRecordRequest struct {
 	NewDomain    string
 	NewIPAddress string
 	NewTTL       int
-	Comments     string
+	// PTR asks Technitium to move the A/AAAA record's reverse PTR record
+	// along with it; without it a rename leaves the old name in reverse DNS.
+	PTR           bool
+	CreatePTRZone bool
+	Comments      string
 }
 
 // DeleteRecordRequest removes a record. See

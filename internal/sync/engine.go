@@ -40,6 +40,7 @@ type DNSClient interface {
 	AddRecord(ctx context.Context, r technitium.AddRecordRequest) error
 	UpdateRecord(ctx context.Context, r technitium.UpdateRecordRequest) error
 	DeleteRecord(ctx context.Context, r technitium.DeleteRecordRequest) error
+	SetPTR(ctx context.Context, ip, name string, ttl int) error
 }
 
 type Engine struct {
@@ -62,6 +63,9 @@ type Engine struct {
 	// lookup for an Identity's record. Defaults to technitium.Verify;
 	// overridable in tests.
 	VerifyDNS func(ctx context.Context, dnsHost, fqdn, expectedIP string, timeout time.Duration) error
+	// LookupPTR reverse-resolves an address for RepairPTRs. Defaults to
+	// technitium.LookupPTR; overridable in tests.
+	LookupPTR func(ctx context.Context, dnsHost, ip string, timeout time.Duration) ([]string, error)
 }
 
 func (e *Engine) isAliveFunc() func(ip string) bool {
@@ -309,13 +313,15 @@ func (e *Engine) applyChanges(ctx context.Context, dns DNSClient, dnsCfg config.
 			})
 		case registry.ChangeUpdate:
 			applyErr = dns.UpdateRecord(ctx, technitium.UpdateRecordRequest{
-				Domain:       fqdn(change.PreviousHostname, change.PreviousZone),
-				Zone:         change.PreviousZone,
-				Type:         "A",
-				IPAddress:    change.PreviousIPAddress,
-				NewDomain:    fqdn(change.Hostname, change.Zone),
-				NewIPAddress: change.IPAddress,
-				NewTTL:       dnsCfg.TTL,
+				Domain:        fqdn(change.PreviousHostname, change.PreviousZone),
+				Zone:          change.PreviousZone,
+				Type:          "A",
+				IPAddress:     change.PreviousIPAddress,
+				NewDomain:     fqdn(change.Hostname, change.Zone),
+				NewIPAddress:  change.IPAddress,
+				NewTTL:        dnsCfg.TTL,
+				PTR:           dnsCfg.CreatePTR,
+				CreatePTRZone: dnsCfg.CreatePTR,
 			})
 		case registry.ChangeDelete:
 			applyErr = dns.DeleteRecord(ctx, technitium.DeleteRecordRequest{

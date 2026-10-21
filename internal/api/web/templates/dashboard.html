@@ -6,6 +6,9 @@
     <form method="post" action="/sync">
       <button type="submit">Sync now</button>
     </form>
+    <form method="post" action="/sync/ptr">
+      <button type="submit" title="Point each published address's PTR record at its current hostname">Repair reverse DNS</button>
+    </form>
   </div>
 </div>
 {{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}

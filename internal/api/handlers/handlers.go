@@ -20,6 +20,7 @@ import (
 	"github.com/Ohgwen/on-netreg/internal/db"
 	"github.com/Ohgwen/on-netreg/internal/directory"
 	"github.com/Ohgwen/on-netreg/internal/macaddr"
+	netsync "github.com/Ohgwen/on-netreg/internal/sync"
 	"github.com/Ohgwen/on-netreg/internal/technitium"
 )
 
@@ -50,6 +51,7 @@ func newDeviceView(d db.Device, identityName string) deviceView {
 // Engine is the subset of sync.Engine the handlers depend on.
 type Engine interface {
 	RunOnce(ctx context.Context) error
+	RepairPTRs(ctx context.Context) (netsync.PTRReport, error)
 }
 
 // DNSClient is the subset of the Technitium client used to remove a
@@ -155,6 +157,7 @@ func (h *Handlers) Routes() http.Handler {
 	mux.HandleFunc("GET /{$}", h.dashboard)
 	mux.HandleFunc("GET /events", h.events)
 	mux.HandleFunc("POST /sync", h.triggerSync)
+	mux.HandleFunc("POST /sync/ptr", h.repairPTRs)
 	mux.HandleFunc("GET /devices/{id}", h.deviceDetail)
 	mux.HandleFunc("POST /devices/{id}/override", h.setOverride)
 	mux.HandleFunc("POST /devices/{id}/addressing", h.setAddressing)
@@ -428,6 +431,43 @@ func (h *Handlers) triggerSync(w http.ResponseWriter, r *http.Request) {
 	}
 	h.logAudit(r, "", db.SyncEventManualSync, flash, success)
 	http.Redirect(w, r, "/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+}
+
+// repairPTRs rewrites any reverse DNS record that doesn't name the host
+// netreg currently publishes at that address.
+func (h *Handlers) repairPTRs(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
+	defer cancel()
+
+	report, err := h.Engine.RepairPTRs(ctx)
+	if err != nil {
+		h.Logger.Error("PTR repair failed", "error", err)
+		flash := "Reverse DNS repair failed: " + err.Error()
+		h.logAudit(r, "", db.SyncEventPTR, flash, false)
+		http.Redirect(w, r, "/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+		return
+	}
+
+	flash := fmt.Sprintf("Reverse DNS: checked %d, fixed %d.", report.Checked, len(report.Fixed))
+	if len(report.Fixed) > 0 {
+		flash += " " + summarize(report.Fixed, 5)
+	}
+	if len(report.Conflicts) > 0 {
+		flash += fmt.Sprintf(" Skipped %d shared address(es): %s", len(report.Conflicts), summarize(report.Conflicts, 3))
+	}
+	if len(report.Errors) > 0 {
+		flash += fmt.Sprintf(" %d failed: %s", len(report.Errors), summarize(report.Errors, 2))
+	}
+	h.logAudit(r, "", db.SyncEventPTR, flash, len(report.Errors) == 0)
+	http.Redirect(w, r, "/?flash="+url.QueryEscape(flash), http.StatusSeeOther)
+}
+
+// summarize joins up to n items, noting how many more were left out.
+func summarize(items []string, n int) string {
+	if len(items) <= n {
+		return strings.Join(items, "; ") + "."
+	}
+	return fmt.Sprintf("%s; and %d more.", strings.Join(items[:n], "; "), len(items)-n)
 }
 
 func (h *Handlers) deviceByID(w http.ResponseWriter, r *http.Request) (db.Device, bool) {
