@@ -33,6 +33,9 @@ type deviceView struct {
 	// ControllerName is the UniFi console the device was last seen on; blank
 	// for a pre-registered device no console has reported yet.
 	ControllerName string
+	// Network is the network the device's address places it on (see
+	// registry.NetworkMatcher); zero when no known subnet contains it.
+	Network db.UnifiNetwork
 	// PrivateMAC reports whether this device's MAC address is locally
 	// administered (a randomized "private" address), computed fresh from
 	// the MAC on every render so it applies to devices tracked before this
@@ -63,6 +66,7 @@ type Engine interface {
 type DNSClient interface {
 	DeleteRecord(ctx context.Context, r technitium.DeleteRecordRequest) error
 	ListZones(ctx context.Context) ([]technitium.ZoneInfo, error)
+	GetRecords(ctx context.Context, domain, zone string, listZone bool) ([]technitium.DNSRecord, error)
 }
 
 // DNSClientFactory builds a DNSClient from the Technitium connection
@@ -120,8 +124,12 @@ type pageData struct {
 	FilterCreatedTo   string
 	FilterSeenFrom    string
 	FilterSeenTo      string
-	Networks          []string
+	Networks          []db.UnifiNetwork
 	DeviceZones       []string
+
+	// device.html: the device's live DNS records, as Technitium has them
+	DNSRecords      []deviceRecord
+	DNSRecordsError string
 
 	// events.html filters
 	Actors      []string
@@ -147,6 +155,10 @@ type pageData struct {
 	FormIP      string
 	RegZones    []string
 	FormError   string
+
+	// settings_networks.html / settings_network.html
+	NetworkViews []networkView
+	NetworkPage  networkPage
 
 	// settings_identities.html
 	IdentityViews []identityView
@@ -231,8 +243,10 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 		like := "%" + search + "%"
 		query = query.Where("hostname LIKE ? OR mac LIKE ? OR ip_address LIKE ? OR uni_fi_name LIKE ? OR owner_username LIKE ? OR owner_name LIKE ? OR description LIKE ? OR os LIKE ?", like, like, like, like, like, like, like, like)
 	}
-	if networkFilter != "" {
-		query = query.Where("uni_fi_network_name = ?", networkFilter)
+	if networkFilter == "none" {
+		query = query.Where("network_id IS NULL")
+	} else if id, err := strconv.ParseUint(networkFilter, 10, 64); err == nil {
+		query = query.Where("network_id = ?", uint(id))
 	}
 	if zoneFilter != "" {
 		query = query.Where("zone = ?", zoneFilter)
@@ -272,6 +286,16 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 	for _, c := range consoles {
 		consoleNames[c.ID] = c.Name
 	}
+	var networks []db.UnifiNetwork
+	if err := h.DB.Order("name").Find(&networks).Error; err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	networksByID := make(map[uint]db.UnifiNetwork, len(networks))
+	for _, n := range networks {
+		networksByID[n.ID] = n
+	}
+
 	views := make([]deviceView, 0, len(devices))
 	for _, d := range devices {
 		var identityName string
@@ -280,14 +304,12 @@ func (h *Handlers) dashboard(w http.ResponseWriter, r *http.Request) {
 		}
 		v := newDeviceView(d, identityName)
 		v.ControllerName = consoleNames[d.ControllerID]
+		if d.NetworkID != nil {
+			v.Network = networksByID[*d.NetworkID]
+		}
 		views = append(views, v)
 	}
 
-	var networks []string
-	if err := h.DB.Model(&db.Device{}).Where("uni_fi_network_name <> ''").Distinct().Order("uni_fi_network_name").Pluck("uni_fi_network_name", &networks).Error; err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	var zones []string
 	if err := h.DB.Model(&db.Device{}).Where("zone <> ''").Distinct().Order("zone").Pluck("zone", &zones).Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -379,13 +401,22 @@ func (h *Handlers) deviceDetail(w http.ResponseWriter, r *http.Request) {
 			view.ControllerName = ctrl.Name
 		}
 	}
-	h.render(w, r, "device", pageData{
-		Title:   dev.EffectiveHostname(),
-		Device:  view,
-		Aliases: aliases,
-		Events:  events,
-		Flash:   r.URL.Query().Get("flash"),
-	})
+	if network, err := h.deviceNetwork(dev); err == nil {
+		view.Network = network
+	}
+	records, recordsErr := h.deviceRecords(r.Context(), dev, aliases)
+	data := pageData{
+		Title:      dev.EffectiveHostname(),
+		Device:     view,
+		Aliases:    aliases,
+		Events:     events,
+		DNSRecords: records,
+		Flash:      r.URL.Query().Get("flash"),
+	}
+	if recordsErr != nil {
+		data.DNSRecordsError = recordsErr.Error()
+	}
+	h.render(w, r, "device", data)
 }
 
 func (h *Handlers) events(w http.ResponseWriter, r *http.Request) {

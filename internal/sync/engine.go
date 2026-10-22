@@ -36,6 +36,14 @@ type UnifiClient interface {
 	FetchClients(ctx context.Context) ([]unifi.NetworkClient, error)
 }
 
+// NetworkImporter is implemented by UniFi clients that can list the
+// networks configured on their controller. Each cycle the engine imports
+// them first, so a device's subnet can be matched against an up-to-date
+// network list.
+type NetworkImporter interface {
+	FetchNetworks(ctx context.Context) ([]unifi.Network, error)
+}
+
 // DNSClient is the subset of the Technitium client the engine depends on.
 type DNSClient interface {
 	AddRecord(ctx context.Context, r technitium.AddRecordRequest) error
@@ -165,14 +173,30 @@ func (e *Engine) RunOnce(ctx context.Context) error {
 		return nil
 	}
 
+	var errs []error
+	type controllerClient struct {
+		ctrl   settings.ControllerRuntime
+		client UnifiClient
+	}
+	clients := make([]controllerClient, 0, len(controllers))
+	for _, ctrl := range controllers {
+		client, err := e.NewUnifiClient(ctrl.Config)
+		if err != nil {
+			e.Logger.Error("sync failed for controller", "controller", ctrl.Name, "error", err)
+			errs = append(errs, fmt.Errorf("controller %q: creating unifi client: %w", ctrl.Name, err))
+			continue
+		}
+		e.importNetworks(ctx, ctrl, client)
+		clients = append(clients, controllerClient{ctrl: ctrl, client: client})
+	}
+
+	// Every known network, from any controller or added by hand, is a
+	// candidate: a device is placed by its address alone.
 	networks, err := settings.LoadNetworks(e.DB)
 	if err != nil {
-		return fmt.Errorf("loading unifi networks: %w", err)
+		return fmt.Errorf("loading networks: %w", err)
 	}
-	networksByController := make(map[uint][]db.UnifiNetwork, len(controllers))
-	for _, n := range networks {
-		networksByController[n.ControllerID] = append(networksByController[n.ControllerID], n)
-	}
+	matcher := registry.NewNetworkMatcher(networks)
 
 	var members []db.IdentityMember
 	if err := e.DB.Find(&members).Error; err != nil {
@@ -183,11 +207,10 @@ func (e *Engine) RunOnce(ctx context.Context) error {
 		skipDNS[m.MAC] = true
 	}
 
-	var errs []error
-	for _, ctrl := range controllers {
-		if err := e.syncController(ctx, ctrl, networksByController[ctrl.ID], dns, dnsCfg, appSettings, skipDNS); err != nil {
-			e.Logger.Error("sync failed for controller", "controller", ctrl.Name, "error", err)
-			errs = append(errs, fmt.Errorf("controller %q: %w", ctrl.Name, err))
+	for _, c := range clients {
+		if err := e.syncController(ctx, c.ctrl, c.client, matcher, dns, dnsCfg, appSettings, skipDNS); err != nil {
+			e.Logger.Error("sync failed for controller", "controller", c.ctrl.Name, "error", err)
+			errs = append(errs, fmt.Errorf("controller %q: %w", c.ctrl.Name, err))
 		}
 	}
 
@@ -204,12 +227,24 @@ func (e *Engine) RunOnce(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRuntime, networks []db.UnifiNetwork, dns DNSClient, dnsCfg config.TechnitiumConfig, appSettings db.AppSettings, skipDNS map[string]bool) error {
-	unifiClient, err := e.NewUnifiClient(ctrl.Config)
-	if err != nil {
-		return fmt.Errorf("creating unifi client: %w", err)
+// importNetworks refreshes the networks imported from ctrl, if its client
+// can list them. A failure is logged and otherwise ignored: the networks
+// imported on an earlier cycle are still good enough to place devices.
+func (e *Engine) importNetworks(ctx context.Context, ctrl settings.ControllerRuntime, client UnifiClient) {
+	importer, ok := client.(NetworkImporter)
+	if !ok {
+		return
 	}
+	networks, err := importer.FetchNetworks(ctx)
+	if err == nil {
+		err = settings.UpsertNetworks(e.DB, ctrl.ID, networks)
+	}
+	if err != nil {
+		e.Logger.Warn("importing networks failed", "controller", ctrl.Name, "error", err)
+	}
+}
 
+func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRuntime, unifiClient UnifiClient, matcher *registry.NetworkMatcher, dns DNSClient, dnsCfg config.TechnitiumConfig, appSettings db.AppSettings, skipDNS map[string]bool) error {
 	seen, err := unifiClient.FetchClients(ctx)
 	if err != nil {
 		return fmt.Errorf("fetching clients: %w", err)
@@ -241,13 +276,11 @@ func (e *Engine) syncController(ctx context.Context, ctrl settings.ControllerRun
 		defaultZone = appSettings.DefaultZone
 	}
 
-	networkByUnifiID := make(map[string]db.UnifiNetwork, len(networks))
-	for _, n := range networks {
-		networkByUnifiID[n.UnifiNetworkID] = n
-	}
+	// The client's subnet, not the network UniFi says it's on, decides its
+	// network: UniFi's network_id can be stale or simply wrong.
 	resolver := func(c unifi.NetworkClient) registry.NetworkInfo {
-		n, ok := networkByUnifiID[c.NetworkID]
-		if !ok || c.NetworkID == "" {
+		n, ok := matcher.Match(c.IP, ctrl.ID)
+		if !ok {
 			return registry.NetworkInfo{Zone: defaultZone}
 		}
 		zone := n.Zone

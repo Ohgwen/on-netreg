@@ -39,7 +39,7 @@
   <tbody>
   {{range .Networks}}
   <tr>
-    <td>{{.Name}}</td>
+    <td><a href="/settings/networks/{{.ID}}">{{.Name}}</a></td>
     <td>{{.VLAN}}</td>
     <td class="mono">{{.IPSubnet}}</td>
     <td class="mono">{{if .Zone}}{{.Zone}}{{else}}<span class="badge badge-muted">controller default</span>{{end}}</td>

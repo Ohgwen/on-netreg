@@ -252,6 +252,11 @@ func UpsertNetworks(gdb *gorm.DB, controllerID uint, fetched []unifi.Network) er
 		case err != nil:
 			return fmt.Errorf("looking up network %q: %w", n.Name, err)
 		default:
+			// Imported every sync cycle, so skip the write when nothing
+			// changed.
+			if existing.Name == n.Name && existing.VLAN == n.VLAN && existing.IPSubnet == n.IPSubnet && existing.DHCPLeaseTimeSeconds == n.DHCPLeaseTimeSeconds {
+				continue
+			}
 			existing.Name = n.Name
 			existing.VLAN = n.VLAN
 			existing.IPSubnet = n.IPSubnet

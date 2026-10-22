@@ -1,0 +1,128 @@
+{{define "content"}}
+{{$p := .NetworkPage}}{{$n := $p.Network}}
+<div class="page-head">
+  <h1>{{$n.Name}} <span class="mono muted">{{$n.IPSubnet}}</span></h1>
+  <span><a href="/settings/networks">&larr; All networks</a></span>
+</div>
+{{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
+
+<datalist id="zone-options">{{range $p.ZoneNames}}<option value="{{.}}">{{end}}</datalist>
+
+<div class="card">
+<table class="detail">
+<tbody>
+<tr><th>Source</th><td>{{if $n.Manual}}Added in netreg{{else}}Imported from UniFi · {{$n.ControllerName}}{{end}}</td></tr>
+<tr><th>Zone</th><td class="mono">{{if $n.EffectiveZone}}{{$n.EffectiveZone}}{{else}}<span class="badge badge-muted">none</span>{{end}}{{if ne $n.ZoneSource "network"}} <span class="badge badge-muted">{{$n.ZoneSource}}</span>{{end}}</td></tr>
+<tr><th>DHCP lease</th><td>{{if $n.DHCPLeaseTimeSeconds}}{{formatDuration $n.DHCPLeaseTimeSeconds}}{{else}}<span class="muted">unknown</span>{{end}}</td></tr>
+<tr><th>Devices</th><td>{{len $p.Devices}}</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="section-head"><h2>Settings</h2></div>
+<form method="post" action="/settings/networks/{{$n.ID}}" class="card form-grid">
+  {{if $n.Manual}}
+  <label>Name <input type="text" name="name" value="{{$n.Name}}" required autocomplete="off"></label>
+  <label>Subnet <input type="text" name="subnet" value="{{$n.IPSubnet}}" required autocomplete="off" spellcheck="false"></label>
+  <label>VLAN <input type="number" name="vlan" min="0" max="4094" value="{{if $n.VLAN}}{{$n.VLAN}}{{end}}"></label>
+  <label>DHCP lease time (hours) <input type="number" name="lease_hours" min="0" step="any" value="{{if $n.DHCPLeaseTimeSeconds}}{{printf "%.4g" (divHours $n.DHCPLeaseTimeSeconds)}}{{end}}"></label>
+  {{else}}
+  <p class="hint">Name, subnet, VLAN and lease time come from UniFi and refresh on every sync. Only the zone is set here.</p>
+  {{end}}
+  <label>Zone <input type="text" name="zone" list="zone-options" value="{{$n.Zone}}" placeholder="(default zone)" autocomplete="off" spellcheck="false"></label>
+  <div class="actions"><button type="submit">Save</button></div>
+</form>
+{{if $n.Manual}}
+<form method="post" action="/settings/networks/{{$n.ID}}/delete" class="inline" onsubmit="return confirm('Delete this network? Its devices are re-placed by subnet on the next sync.');">
+  <button type="submit" class="danger">Delete network</button>
+</form>
+{{end}}
+
+<div class="section-head">
+  <h2>DNS records{{if $p.Zone}} <span class="mono muted">{{$p.Zone}}</span>{{end}}</h2>
+  {{if $p.Zone}}{{if $p.ShowAll}}<a href="/settings/networks/{{$n.ID}}">Only this subnet</a>{{else}}<a href="/settings/networks/{{$n.ID}}?all=1">Whole zone</a>{{end}}{{end}}
+</div>
+{{if $p.RecordsError}}<p class="flash" role="status">{{$p.RecordsError}}</p>{{end}}
+{{template "records" dict "Records" $p.Forward "Network" $n "ShowAll" $p.ShowAll "Empty" "No records in this subnet."}}
+
+<div class="section-head"><h2>Reverse records (PTR)</h2></div>
+{{if $p.ReverseError}}<p class="hint">{{$p.ReverseError}}</p>{{else}}
+{{template "records" dict "Records" $p.Reverse "Network" $n "ShowAll" $p.ShowAll "Empty" "No PTR records for this subnet."}}
+{{end}}
+
+<div class="section-head"><h2>Add a record</h2></div>
+<form method="post" action="/settings/networks/{{$n.ID}}/records" class="card form-grid">
+  <label>Type
+    <select name="type">
+      <option value="A">A</option>
+      <option value="AAAA">AAAA</option>
+      <option value="CNAME">CNAME</option>
+      <option value="TXT">TXT</option>
+      <option value="PTR">PTR</option>
+    </select>
+  </label>
+  <label>Name <input type="text" name="name" placeholder="host  (for PTR: the IP address)" autocomplete="off" spellcheck="false"></label>
+  <label>Value <input type="text" name="value" placeholder="10.0.20.5 / target.example.com / text" required autocomplete="off" spellcheck="false"></label>
+  <label>TTL (seconds) <input type="number" name="ttl" min="0" placeholder="(server default)"></label>
+  <label class="checkbox"><input type="checkbox" name="ptr"> Also create the PTR record (A/AAAA)</label>
+  <p class="hint">Names are relative to {{if $p.Zone}}<span class="mono">{{$p.Zone}}</span>{{else}}the network's zone{{end}}; use @ for the zone itself. An A record's address must be inside {{$n.IPSubnet}}.</p>
+  <div class="actions"><button type="submit">Add record</button></div>
+</form>
+
+<div class="section-head"><h2>Devices on this network</h2></div>
+<div class="table-wrap">
+<table class="devices">
+<thead><tr><th>Hostname</th><th>IP</th><th>MAC</th><th>Zone</th><th>UniFi reports</th></tr></thead>
+<tbody>
+{{range $p.Devices}}
+<tr>
+  <td><a href="/devices/{{.ID}}">{{.EffectiveHostname}}</a></td>
+  <td class="mono">{{.IPAddress}}</td>
+  <td class="mono">{{.MAC}}</td>
+  <td class="mono">{{.Zone}}</td>
+  <td>{{.UniFiNetworkName}}{{if and .UniFiNetworkName (ne .UniFiNetworkName $n.Name)}} <span class="badge badge-warn" title="UniFi's label disagrees with the device's subnet; the subnet wins">differs</span>{{end}}</td>
+</tr>
+{{else}}
+<tr><td colspan="5" class="empty">No devices have an address in this subnet.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{end}}
+
+{{define "records"}}
+<div class="table-wrap">
+<table class="devices">
+<thead><tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th>Device</th><th>Last modified</th><th>Last used</th><th>Comments</th><th></th></tr></thead>
+<tbody>
+{{range .Records}}
+<tr{{if .Disabled}} class="excluded"{{end}}>
+  <td class="mono">{{.Name}}</td>
+  <td>{{.Type}}{{if .Disabled}} <span class="badge badge-muted">disabled</span>{{end}}</td>
+  <td class="mono">{{.Value}}</td>
+  <td>{{.TTL}}</td>
+  <td>{{if .DeviceID}}<a href="/devices/{{.DeviceID}}">{{.DeviceName}}</a>{{end}}</td>
+  <td>{{with .Modified}}{{if not .IsZero}}{{datetime .}}{{end}}{{end}}</td>
+  <td>{{with .LastUsed}}{{if .IsZero}}<span class="muted">never</span>{{else}}{{datetime .}}{{end}}{{end}}</td>
+  <td>{{.Comments}}</td>
+  <td>
+    {{if .ManagedBy}}<span class="badge badge-muted" title="kept in step by the sync engine">{{.ManagedBy}}</span>
+    {{else if .Deletable}}
+    <form method="post" action="/settings/networks/{{$.Network.ID}}/records/delete" class="inline" onsubmit="return confirm('Delete this record from the DNS server?');">
+      <input type="hidden" name="name" value="{{.Name}}">
+      <input type="hidden" name="type" value="{{.Type}}">
+      <input type="hidden" name="value" value="{{.Value}}">
+      <input type="hidden" name="zone" value="{{.Zone}}">
+      {{if $.ShowAll}}<input type="hidden" name="all" value="1">{{end}}
+      <button type="submit" class="danger" aria-label="Delete {{.Type}} record {{.Name}}">Delete</button>
+    </form>
+    {{end}}
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="9" class="empty">{{.Empty}}</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+{{end}}

@@ -355,3 +355,62 @@ func TestKickCoalesces(t *testing.T) {
 		t.Fatalf("queued kicks = %d, want 1", n)
 	}
 }
+
+// fakeImporter is a UniFi client that also lists its controller's networks.
+type fakeImporter struct {
+	fakeUnifi
+	networks []unifi.Network
+}
+
+func (f fakeImporter) FetchNetworks(ctx context.Context) ([]unifi.Network, error) {
+	return f.networks, nil
+}
+
+// Networks are imported from the controller each cycle, and a device is
+// placed on the network its address is in -- not the one UniFi names.
+func TestRunOncePlacesDeviceBySubnetNotUnifiNetwork(t *testing.T) {
+	gdb := testDB(t)
+	seedAppSettings(t, gdb)
+	seedTechnitium(t, gdb)
+	seedController(t, gdb, "lan.example.com")
+
+	uc := fakeImporter{
+		fakeUnifi: fakeUnifi{clients: []unifi.NetworkClient{{
+			MAC: "10:bb:cc:dd:ee:01", Name: "Camera", IP: "10.0.20.15", Online: true,
+			// UniFi claims the camera is on the main LAN; its address says IoT.
+			NetworkID: "lan-id", Network: "LAN",
+		}}},
+		networks: []unifi.Network{
+			{ID: "lan-id", Name: "LAN", IPSubnet: "10.0.0.1/24"},
+			{ID: "iot-id", Name: "IoT", IPSubnet: "10.0.20.1/24"},
+		},
+	}
+	dns := &fakeDNS{}
+	e := newTestEngine(gdb, dns, uc)
+
+	// Map IoT to its own zone once the import has created it.
+	if err := e.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	var iot db.UnifiNetwork
+	if err := gdb.Where("unifi_network_id = ?", "iot-id").First(&iot).Error; err != nil {
+		t.Fatalf("IoT network not imported: %v", err)
+	}
+	iot.Zone = "iot.example.com"
+	gdb.Save(&iot)
+	if err := e.RunOnce(context.Background()); err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+
+	var dev db.Device
+	gdb.Where("mac = ?", "10:bb:cc:dd:ee:01").First(&dev)
+	if dev.NetworkID == nil || *dev.NetworkID != iot.ID {
+		t.Fatalf("device network = %v, want IoT (%d)", dev.NetworkID, iot.ID)
+	}
+	if dev.Zone != "iot.example.com" {
+		t.Errorf("zone = %q, want iot.example.com", dev.Zone)
+	}
+	if dev.UniFiNetworkName != "LAN" {
+		t.Errorf("UniFi's own label should still be kept for display, got %q", dev.UniFiNetworkName)
+	}
+}

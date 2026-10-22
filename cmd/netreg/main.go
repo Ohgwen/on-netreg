@@ -156,6 +156,7 @@ func run(configPath string, disableAuth bool, logger *slog.Logger) error {
 	settingsHandlers := &handlers.SettingsHandlers{
 		DB:          gdb,
 		SecretKey:   secretKey,
+		Engine:      engine,
 		Pages:       pages,
 		Logger:      logger,
 		CurrentUser: currentUser,

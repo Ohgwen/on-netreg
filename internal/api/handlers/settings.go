@@ -37,6 +37,9 @@ type SettingsHandlers struct {
 	Logger      *slog.Logger
 	CurrentUser func(*http.Request) string
 	IsAdmin     func(*http.Request) bool
+	// Engine, if set, is asked for a sync cycle after a network change, so
+	// devices are re-placed by subnet within seconds.
+	Engine interface{ Kick() }
 }
 
 func (h *SettingsHandlers) Routes() http.Handler {
@@ -53,6 +56,7 @@ func (h *SettingsHandlers) Routes() http.Handler {
 	mux.HandleFunc("POST /settings/controllers/{id}/refresh-networks", h.refreshNetworks)
 
 	mux.HandleFunc("POST /settings/networks/{id}/zone", h.setNetworkZone)
+	h.networkRoutes(mux)
 
 	mux.HandleFunc("GET /settings/technitium", h.technitiumPage)
 	mux.HandleFunc("POST /settings/technitium", h.saveTechnitium)
@@ -361,6 +365,7 @@ func (h *SettingsHandlers) setNetworkZone(w http.ResponseWriter, r *http.Request
 		return
 	}
 	h.logAudit(r, db.SyncEventSettingsChange, fmt.Sprintf("set network %q zone to %q", network.Name, zone))
+	h.kick()
 	http.Redirect(w, r, "/settings/controllers?flash="+url.QueryEscape("Network zone updated."), http.StatusSeeOther)
 }
 

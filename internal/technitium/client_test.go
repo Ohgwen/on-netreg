@@ -201,3 +201,28 @@ func TestReverseName(t *testing.T) {
 		t.Error("expected an error for a non-IP")
 	}
 }
+
+func TestReverseIP(t *testing.T) {
+	if ip, ok := ReverseIP("5.20.0.10.in-addr.arpa."); !ok || ip.String() != "10.0.20.5" {
+		t.Errorf("ReverseIP = %v, %v", ip, ok)
+	}
+	if _, ok := ReverseIP("20.0.10.in-addr.arpa"); ok {
+		t.Error("a partial reverse name is a range, not an address")
+	}
+}
+
+func TestRecordValueAndDelete(t *testing.T) {
+	rec := DNSRecord{Name: "x.example.com", Type: "TXT", RData: map[string]any{"text": "hello"}}
+	if rec.Value() != "hello" {
+		t.Errorf("Value = %q", rec.Value())
+	}
+	if req := rec.DeleteRequest("example.com"); req.Text != "hello" || req.Type != "TXT" {
+		t.Errorf("DeleteRequest = %+v", req)
+	}
+	if (DNSRecord{Type: "SOA"}).Deletable() {
+		t.Error("SOA must not be deletable")
+	}
+	if got := (DNSRecord{LastModified: "0001-01-01T00:00:00"}).Modified(); !got.IsZero() {
+		t.Errorf("never-modified = %v, want zero", got)
+	}
+}

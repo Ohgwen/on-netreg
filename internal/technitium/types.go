@@ -4,18 +4,20 @@ package technitium
 // https://github.com/TechnitiumSoftware/DnsServer/blob/master/APIDOCS.md
 // (POST /api/zones/records/add).
 type AddRecordRequest struct {
-	Domain        string
-	Zone          string
-	Type          string // e.g. "A"
-	TTL           int
-	IPAddress     string
+	Domain    string
+	Zone      string
+	Type      string // e.g. "A"
+	TTL       int
+	IPAddress string
 	// CNAME is the target FQDN when Type is "CNAME".
 	CNAME         string
 	Overwrite     bool
 	PTR           bool
 	CreatePTRZone bool
 	// PTRName is the target name of a PTR record (Type "PTR").
-	PTRName  string
+	PTRName string
+	// Text is the value of a TXT record.
+	Text     string
 	Comments string
 }
 
@@ -47,15 +49,26 @@ type DeleteRecordRequest struct {
 	Zone      string
 	Type      string
 	IPAddress string
+	// PTRName and Text identify which PTR or TXT record at Domain to
+	// remove, since a name can hold several. A CNAME needs no value: a name
+	// holds at most one.
+	PTRName string
+	Text    string
 }
 
 // DNSRecord is a record as returned by /api/zones/records/get.
 type DNSRecord struct {
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	TTL      int    `json:"ttl"`
+	Name     string         `json:"name"`
+	Type     string         `json:"type"`
+	TTL      int            `json:"ttl"`
 	RData    map[string]any `json:"rData"`
-	Disabled bool   `json:"disabled"`
+	Disabled bool           `json:"disabled"`
+	Comments string         `json:"comments"`
+	// LastUsedOn and LastModified are timestamps as Technitium formats
+	// them; LastModified is only reported by newer server versions, and
+	// either is "0001-01-01T00:00:00" when it never happened.
+	LastUsedOn   string `json:"lastUsedOn"`
+	LastModified string `json:"lastModified"`
 }
 
 type loginResponse struct {

@@ -14,7 +14,8 @@
   <nav>
     <a href="/">Devices</a>
     <a href="/events">Sync Log</a>
-    {{if .IsAdmin}}<a href="/settings/">Settings</a>{{end}}
+    {{if .IsAdmin}}<a href="/settings/networks">Networks</a>
+    <a href="/settings/">Settings</a>{{end}}
   </nav>
   <div class="user">
     {{if .User}}{{.User}} &middot; <a href="/logout">Log out</a>{{end}}

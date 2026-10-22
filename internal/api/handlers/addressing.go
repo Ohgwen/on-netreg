@@ -13,6 +13,8 @@ import (
 	"gorm.io/gorm"
 
 	"github.com/Ohgwen/on-netreg/internal/db"
+	"github.com/Ohgwen/on-netreg/internal/registry"
+	"github.com/Ohgwen/on-netreg/internal/settings"
 )
 
 // setAddressing changes how a device is addressed. Reserved and DHCP are
@@ -144,7 +146,7 @@ func (h *Handlers) applyReservation(ctx context.Context, dev db.Device, mode db.
 		return client.ClearFixedIP(ctx, dev.MAC)
 	}
 
-	network, err := h.deviceNetwork(dev)
+	network, err := h.reservationNetwork(dev, ip)
 	if err != nil {
 		return err
 	}
@@ -152,8 +154,10 @@ func (h *Handlers) applyReservation(ctx context.Context, dev db.Device, mode db.
 }
 
 // validateAssignedIP checks that ip is usable as a reserved or static
-// address for dev: a valid IPv4 address, inside the device's network subnet
-// when that's known, and not already claimed by another device.
+// address for dev: a valid IPv4 address inside a known network (for a
+// reservation, one imported from the device's own controller, since UniFi
+// reservations are per network), and not already claimed by another device.
+// The address decides which network the device ends up on.
 func (h *Handlers) validateAssignedIP(dev db.Device, mode db.AddressMode, ip string) error {
 	if mode != db.AddressReserved && mode != db.AddressStatic {
 		return fmt.Errorf("unknown addressing mode %q", mode)
@@ -163,20 +167,16 @@ func (h *Handlers) validateAssignedIP(dev db.Device, mode db.AddressMode, ip str
 		return fmt.Errorf("%q is not a valid IPv4 address", ip)
 	}
 
-	network, err := h.deviceNetwork(dev)
-	switch {
-	case err == nil && network.IPSubnet != "":
-		if _, subnet, perr := net.ParseCIDR(network.IPSubnet); perr == nil && !subnet.Contains(parsed) {
-			return fmt.Errorf("%s is outside %s's subnet %s", ip, network.Name, subnet)
+	if mode == db.AddressReserved {
+		if _, err := h.reservationNetwork(dev, ip); err != nil {
+			return err
 		}
-	case err != nil && mode == db.AddressReserved:
-		// UniFi reservations are per network, so one can't be made
-		// without knowing which network the device is on.
+	} else if err := h.requireKnownSubnet(ip); err != nil {
 		return err
 	}
 
 	var other db.Device
-	err = h.DB.Where("id <> ? AND (ip_address = ? OR assigned_ip = ?)", dev.ID, ip, ip).First(&other).Error
+	err := h.DB.Where("id <> ? AND (ip_address = ? OR assigned_ip = ?)", dev.ID, ip, ip).First(&other).Error
 	if err == nil {
 		return fmt.Errorf("%s is already in use by %s (%s)", ip, other.EffectiveHostname(), other.MAC)
 	}
@@ -186,9 +186,44 @@ func (h *Handlers) validateAssignedIP(dev db.Device, mode db.AddressMode, ip str
 	return nil
 }
 
+// requireKnownSubnet rejects an address outside every known network, so a
+// typo can't silently put a device on no network. With no networks defined
+// at all there's nothing to check against, and any address is accepted.
+func (h *Handlers) requireKnownSubnet(ip string) error {
+	networks, err := settings.LoadNetworks(h.DB)
+	if err != nil {
+		return err
+	}
+	if len(networks) == 0 {
+		return nil
+	}
+	if _, ok := registry.NewNetworkMatcher(networks).Match(ip, 0); !ok {
+		return fmt.Errorf("%s isn't inside any known network's subnet; add the network under Settings > Networks first", ip)
+	}
+	return nil
+}
+
+// reservationNetwork finds the network on dev's own controller whose subnet
+// contains ip -- the UniFi network a reservation for ip must be made on.
+func (h *Handlers) reservationNetwork(dev db.Device, ip string) (db.UnifiNetwork, error) {
+	if dev.ControllerID == 0 {
+		return db.UnifiNetwork{}, errors.New("this device hasn't been seen by a UniFi console yet; connect it once, then try again")
+	}
+	var imported []db.UnifiNetwork
+	if err := h.DB.Where("controller_id = ? AND manual = ?", dev.ControllerID, false).Find(&imported).Error; err != nil {
+		return db.UnifiNetwork{}, fmt.Errorf("loading networks: %w", err)
+	}
+	network, ok := registry.NewNetworkMatcher(imported).Match(ip, dev.ControllerID)
+	if !ok {
+		return db.UnifiNetwork{}, fmt.Errorf("%s isn't inside any network on this device's UniFi console; refresh networks under Settings > Controllers", ip)
+	}
+	return network, nil
+}
+
+// deviceNetwork loads the network dev's address places it on.
 func (h *Handlers) deviceNetwork(dev db.Device) (db.UnifiNetwork, error) {
 	if dev.NetworkID == nil {
-		return db.UnifiNetwork{}, errors.New("this device's network isn't mapped yet; refresh networks under Settings > Controllers")
+		return db.UnifiNetwork{}, errors.New("this device's address isn't inside any known network")
 	}
 	var network db.UnifiNetwork
 	if err := h.DB.First(&network, *dev.NetworkID).Error; err != nil {

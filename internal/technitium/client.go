@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -158,6 +159,9 @@ func (c *Client) AddRecord(ctx context.Context, r AddRecordRequest) error {
 	if r.PTRName != "" {
 		q.Set("ptrName", r.PTRName)
 	}
+	if r.Text != "" {
+		q.Set("text", r.Text)
+	}
 	if r.Overwrite {
 		q.Set("overwrite", "true")
 	}
@@ -250,6 +254,12 @@ func (c *Client) DeleteRecord(ctx context.Context, r DeleteRecordRequest) error 
 	if r.IPAddress != "" {
 		q.Set("ipAddress", r.IPAddress)
 	}
+	if r.PTRName != "" {
+		q.Set("ptrName", r.PTRName)
+	}
+	if r.Text != "" {
+		q.Set("text", r.Text)
+	}
 
 	_, _, err := c.request(ctx, "/api/zones/records/delete", q)
 	return err
@@ -276,6 +286,11 @@ func (c *Client) GetRecords(ctx context.Context, domain, zone string, listZone b
 		return nil, fmt.Errorf("decoding get-records response: %w", err)
 	}
 	return resp.Response.Records, nil
+}
+
+// ZoneRecords returns every record in zone.
+func (c *Client) ZoneRecords(ctx context.Context, zone string) ([]DNSRecord, error) {
+	return c.GetRecords(ctx, zone, zone, true)
 }
 
 // currentAddresses returns the values of the recordType (A or AAAA) records
@@ -353,6 +368,23 @@ func ReverseName(ip string) (string, error) {
 		return "", fmt.Errorf("no reverse name for %q: %w", ip, err)
 	}
 	return strings.TrimSuffix(name, "."), nil
+}
+
+// ReverseIP parses an in-addr.arpa name back into the IPv4 address it
+// stands for; ok is false for anything else (including partial names that
+// cover a whole range rather than one address).
+func ReverseIP(name string) (net.IP, bool) {
+	name = strings.TrimSuffix(strings.ToLower(name), ".")
+	rest, found := strings.CutSuffix(name, ".in-addr.arpa")
+	if !found {
+		return nil, false
+	}
+	octets := strings.Split(rest, ".")
+	if len(octets) != 4 {
+		return nil, false
+	}
+	ip := net.ParseIP(octets[3] + "." + octets[2] + "." + octets[1] + "." + octets[0])
+	return ip, ip != nil
 }
 
 func isAddressType(recordType string) bool {

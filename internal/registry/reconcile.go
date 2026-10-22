@@ -46,8 +46,8 @@ type Result struct {
 // NetworkInfo is what the caller knows, from locally-stored UnifiNetwork
 // mappings, about the network/VLAN a client is on.
 type NetworkInfo struct {
-	// NetworkID is the local UnifiNetwork row id, nil if the client's
-	// network hasn't been mapped/refreshed yet.
+	// NetworkID is the local UnifiNetwork row id, nil if no known network's
+	// subnet contains the client's address.
 	NetworkID *uint
 	// Zone is the resolved target DNS zone: the network's mapped zone, or
 	// the caller's controller/global fallback already applied.
@@ -58,7 +58,10 @@ type NetworkInfo struct {
 }
 
 // ZoneResolver resolves the network/zone info for one seen client, given
-// the caller's locally-stored UnifiNetwork mappings and fallback zones.
+// the caller's locally-stored UnifiNetwork mappings and fallback zones. The
+// client's IP is the address the device is actually using (a static
+// device's registered address replaces the one UniFi reports); callers
+// should place the client by that address, not by UniFi's network fields.
 type ZoneResolver func(client unifi.NetworkClient) NetworkInfo
 
 // Reconcile computes the desired registry state from the current set of
@@ -91,12 +94,6 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 	for _, client := range seen {
 		seenMACs[client.MAC] = true
 		existingDevice, found := existingByMAC[client.MAC]
-		info := resolveNetwork(client)
-		zone := info.Zone
-		// An admin-pinned zone wins over whatever the client's network maps to.
-		if found && existingDevice.ZoneOverride != "" {
-			zone = existingDevice.ZoneOverride
-		}
 
 		// A static device configures its own address, so DNS follows the
 		// address registered for it rather than whatever UniFi last saw.
@@ -105,6 +102,24 @@ func Reconcile(now time.Time, controllerID uint, existing []db.Device, seen []un
 		}
 
 		hasValidIP := HasValidIP(client.IP)
+
+		// The network is decided by the address (see NetworkMatcher), so
+		// it's resolved only after a static address has replaced UniFi's.
+		info := resolveNetwork(client)
+		// With no address there is no subnet to place the device in: it
+		// stays on the network, and in the zone, it was last seen on rather
+		// than dropping to the default zone until it reconnects.
+		if !hasValidIP && found && existingDevice.NetworkID != nil {
+			info.NetworkID = existingDevice.NetworkID
+			if existingDevice.Zone != "" {
+				info.Zone = existingDevice.Zone
+			}
+		}
+		zone := info.Zone
+		// An admin-pinned zone wins over whatever the client's network maps to.
+		if found && existingDevice.ZoneOverride != "" {
+			zone = existingDevice.ZoneOverride
+		}
 
 		if found && (existingDevice.Excluded || skipDNS[client.MAC]) {
 			dev := existingDevice

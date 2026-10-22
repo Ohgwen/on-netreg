@@ -197,6 +197,9 @@ func TestDashboardShowsAndFiltersByConsole(t *testing.T) {
 type fakeZones struct{ zones []string }
 
 func (f fakeZones) DeleteRecord(context.Context, technitium.DeleteRecordRequest) error { return nil }
+func (f fakeZones) GetRecords(context.Context, string, string, bool) ([]technitium.DNSRecord, error) {
+	return nil, nil
+}
 func (f fakeZones) ListZones(context.Context) ([]technitium.ZoneInfo, error) {
 	out := make([]technitium.ZoneInfo, len(f.zones))
 	for i, z := range f.zones {

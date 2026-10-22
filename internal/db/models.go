@@ -27,12 +27,13 @@ type Device struct {
 	// (see internal/registry.Reconcile's skipDNS handling). Denormalized
 	// from IdentityMember for cheap lookups from the dashboard/device pages.
 	IdentityID *uint `gorm:"index"`
-	// NetworkID, if set, is the UnifiNetwork (VLAN) this device was last
-	// seen on. Nil when the client's network hasn't been mapped/refreshed
-	// yet.
+	// NetworkID, if set, is the UnifiNetwork (VLAN) this device is on,
+	// decided by which known network's subnet contains its address (see
+	// registry.NetworkMatcher). Nil when no known subnet contains it.
 	NetworkID *uint
 	// UniFiNetworkName is the raw network name as reported by the
-	// controller, kept for display even when NetworkID is nil.
+	// controller. Display only: UniFi can report the wrong network, so it
+	// never decides NetworkID.
 	UniFiNetworkName string
 
 	// Extended UniFi connection details, refreshed every sync cycle.
@@ -198,6 +199,8 @@ const (
 	SyncEventRegister       SyncEventAction = "register"
 	SyncEventAssign         SyncEventAction = "assign"
 	SyncEventAlias          SyncEventAction = "alias"
+	SyncEventDNSRecord      SyncEventAction = "dns_record"
+	SyncEventNetwork        SyncEventAction = "network"
 )
 
 // SystemActor identifies sync-engine-driven events, as opposed to a

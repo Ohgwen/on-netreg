@@ -318,8 +318,8 @@ func (h *Handlers) precheckAddressing(mac string, in registerInput) error {
 	if err := h.DB.Where("mac = ?", mac).First(&dev).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
 	}
-	if mode == db.AddressReserved && (dev.ControllerID == 0 || dev.NetworkID == nil) {
-		return inputError("A DHCP reservation needs to know the device's UniFi network, so the device must connect once first. Register it as DHCP or static for now, then reserve its address from the device page.")
+	if mode == db.AddressReserved && dev.ControllerID == 0 {
+		return inputError("A DHCP reservation is made on the device's UniFi console, so the device must connect once first. Register it as DHCP or static for now, then reserve its address from the device page.")
 	}
 	if err := h.validateAssignedIP(dev, mode, in.IP); err != nil {
 		return inputError(err.Error())

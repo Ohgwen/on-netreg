@@ -1,0 +1,46 @@
+{{define "content"}}
+<h1>Settings</h1>
+<nav class="subnav">
+  <a href="/settings/">General</a>
+  <a href="/settings/networks" class="active">Networks</a>
+  <a href="/settings/controllers">UniFi Controllers</a>
+  <a href="/settings/technitium">Technitium</a>
+  <a href="/settings/zones">Zones</a>
+  <a href="/settings/identities">Identities</a>
+</nav>
+{{if .Flash}}<p class="flash" role="status">{{.Flash}}</p>{{end}}
+
+<p class="hint">A device is on whichever network's subnet contains its IP address, not the network UniFi reports for it. When two networks cover an address, the narrower subnet wins. For identical subnets, a network added here wins over one imported from UniFi. Networks are imported from each UniFi console on every sync.</p>
+
+<datalist id="zone-options">{{range .ZoneNames}}<option value="{{.}}">{{end}}</datalist>
+
+<div class="table-wrap">
+<table class="devices">
+<thead><tr><th>Name</th><th>Subnet</th><th>VLAN</th><th>Source</th><th>Zone</th><th>Devices</th></tr></thead>
+<tbody>
+{{range .NetworkViews}}
+<tr>
+  <td><a href="/settings/networks/{{.ID}}">{{.Name}}</a></td>
+  <td class="mono">{{if .IPSubnet}}{{.IPSubnet}}{{else}}<span class="badge badge-muted" title="without a subnet no device can be placed on this network">no subnet</span>{{end}}</td>
+  <td>{{if .VLAN}}{{.VLAN}}{{end}}</td>
+  <td>{{if .Manual}}<span class="badge badge-ok">netreg</span>{{else}}UniFi · {{.ControllerName}}{{end}}</td>
+  <td class="mono">{{if .EffectiveZone}}{{.EffectiveZone}}{{end}}{{if ne .ZoneSource "network"}} <span class="badge badge-muted">{{.ZoneSource}}</span>{{end}}</td>
+  <td>{{.DeviceCount}}</td>
+</tr>
+{{else}}
+<tr><td colspan="6" class="empty">No networks yet. Add one below, or add a UniFi controller and its networks are imported on the next sync.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
+
+<div class="section-head"><h2>Add a network</h2></div>
+<form method="post" action="/settings/networks" class="card form-grid">
+  <label>Name <input type="text" name="name" placeholder="IoT" required autocomplete="off"></label>
+  <label>Subnet <input type="text" name="subnet" placeholder="10.0.20.0/24" required autocomplete="off" spellcheck="false"></label>
+  <label>VLAN <input type="number" name="vlan" min="0" max="4094" placeholder="(optional)"></label>
+  <label>Zone <input type="text" name="zone" list="zone-options" placeholder="(default zone)" autocomplete="off" spellcheck="false"></label>
+  <label>DHCP lease time (hours) <input type="number" name="lease_hours" min="0" step="any" placeholder="(unknown)"></label>
+  <div class="actions"><button type="submit">Add network</button></div>
+</form>
+{{end}}

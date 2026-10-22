@@ -25,16 +25,29 @@ type UnifiController struct {
 	UpdatedAt time.Time
 }
 
-// UnifiNetwork is a network/VLAN discovered on a UnifiController, mapped to
-// the DNS zone its clients should sync to.
+// UnifiNetwork is a network/VLAN netreg knows about, mapped to the DNS zone
+// its clients should sync to. Most are imported from a UnifiController;
+// Manual ones are added by an admin in netreg. Either way, a device belongs
+// to whichever network's IPSubnet contains its address -- UniFi's own idea
+// of which network a client is on is not trusted (see
+// registry.NetworkMatcher).
 type UnifiNetwork struct {
 	ID uint `gorm:"primaryKey"`
 
+	// ControllerID is the controller this network was imported from; 0 for
+	// a Manual network.
 	ControllerID uint `gorm:"not null;index:idx_unifi_network_controller_unifi_id,unique"`
 
 	// UnifiNetworkID is the controller's own id (_id) for this network,
-	// used to upsert on refresh without losing the user-assigned Zone.
+	// used to upsert on refresh without losing the user-assigned Zone. For
+	// a Manual network it is a generated "manual:" id that only keeps the
+	// unique index happy.
 	UnifiNetworkID string `gorm:"size:64;not null;index:idx_unifi_network_controller_unifi_id,unique"`
+
+	// Manual marks a network added in netreg rather than imported from a
+	// controller. Manual networks win over imported ones with the same
+	// subnet, and a controller refresh never touches them.
+	Manual bool `gorm:"not null;default:false"`
 
 	Name     string
 	VLAN     int

@@ -93,7 +93,7 @@ func TestChangeAddressingRejectsBadIPs(t *testing.T) {
 
 	for ip, want := range map[string]string{
 		"not-an-ip": "not a valid IPv4",
-		"10.9.9.9":  "outside",
+		"10.9.9.9":  "isn't inside any network",
 		"10.0.0.30": "already in use",
 	} {
 		_, _, err := h.changeAddressing(context.Background(), httptest.NewRequest("POST", "/", nil), dev, db.AddressReserved, ip)
@@ -151,5 +151,32 @@ func TestPushNameSetsUnifiAlias(t *testing.T) {
 	gdb.First(&got, dev.ID)
 	if got.UniFiName != "h-fireplace-tv" {
 		t.Errorf("stored UniFi name %q", got.UniFiName)
+	}
+}
+
+// A reservation goes on the UniFi network whose subnet holds the address,
+// even when the device is currently placed on a different network.
+func TestReservationUsesSubnetNetwork(t *testing.T) {
+	h, gdb := testHandlers(t)
+	withUnifi(h)
+	dev := seenDevice(t, h, "aa:bb:cc:dd:ee:13")
+	other := db.UnifiNetwork{ControllerID: 1, UnifiNetworkID: "net2", Name: "Cameras", IPSubnet: "10.0.1.1/24"}
+	gdb.Create(&other)
+
+	got, err := h.reservationNetwork(dev, "10.0.1.40")
+	if err != nil || got.UnifiNetworkID != "net2" {
+		t.Fatalf("reservation network = %q, %v; want net2", got.UnifiNetworkID, err)
+	}
+}
+
+func TestStaticAddressMustBeInKnownSubnet(t *testing.T) {
+	h, _ := testHandlers(t)
+	withUnifi(h)
+	dev := seenDevice(t, h, "aa:bb:cc:dd:ee:14")
+	if err := h.validateAssignedIP(dev, db.AddressStatic, "172.16.0.5"); err == nil || !strings.Contains(err.Error(), "isn't inside any known network") {
+		t.Errorf("err = %v, want unknown-subnet rejection", err)
+	}
+	if err := h.validateAssignedIP(dev, db.AddressStatic, "10.0.0.77"); err != nil {
+		t.Errorf("address in a known subnet rejected: %v", err)
 	}
 }

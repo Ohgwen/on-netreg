@@ -23,7 +23,11 @@
 </td></tr>
 <tr><th>UniFi name</th><td>{{.Device.UniFiName}}</td></tr>
 <tr><th>UniFi console</th><td>{{if .Device.ControllerName}}{{.Device.ControllerName}}{{else}}<span class="badge badge-muted">not seen by a console yet</span>{{end}}</td></tr>
-<tr><th>Network</th><td>{{.Device.UniFiNetworkName}}</td></tr>
+<tr><th>Network</th><td>
+  {{if .Device.Network.ID}}{{if .IsAdmin}}<a href="/settings/networks/{{.Device.Network.ID}}">{{.Device.Network.Name}}</a>{{else}}{{.Device.Network.Name}}{{end}} <span class="mono muted">{{.Device.Network.IPSubnet}}</span>
+  {{else}}<span class="badge badge-muted" title="the network is decided by which known subnet contains the device's address">no known subnet contains this address</span>{{end}}
+  {{if and .Device.UniFiNetworkName (ne .Device.UniFiNetworkName .Device.Network.Name)}}<span class="badge badge-warn" title="UniFi's network label is not used; the device's address decides its network">UniFi reports {{.Device.UniFiNetworkName}}</span>{{end}}
+</td></tr>
 <tr><th>Zone</th><td class="mono">{{.Device.Zone}}{{if .Device.ZoneOverride}} <span class="badge badge-muted" title="pinned at registration; ignores the network's mapped zone">pinned{{if ne .Device.Zone .Device.ZoneOverride}} → {{.Device.ZoneOverride}}{{end}}</span>{{end}}</td></tr>
 {{if .Device.OS}}<tr><th>OS</th><td>{{.Device.OS}}</td></tr>{{end}}
 {{if .Device.Description}}<tr><th>Description</th><td>{{.Device.Description}}</td></tr>{{end}}
@@ -47,6 +51,43 @@
 </td></tr>
 </tbody>
 </table>
+</div>
+
+<div class="section-head"><h2>DNS records</h2></div>
+<div class="card">
+{{if .DNSRecordsError}}<p class="flash" role="status">Couldn't read records from the DNS server: {{.DNSRecordsError}}</p>{{end}}
+<div class="table-wrap">
+<table class="devices">
+<thead><tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th>Status</th><th>Last modified</th><th>Last used</th><th>Comments</th></tr></thead>
+<tbody>
+{{range .DNSRecords}}
+<tr>
+  <td class="mono">{{.Name}}</td>
+  <td>{{.Type}} <span class="muted">({{.Role}})</span></td>
+  {{if .Missing}}
+  <td class="mono muted">{{.Expected}}</td>
+  <td></td>
+  <td><span class="badge badge-error" title="netreg expects this record, but the DNS server doesn't have it">missing</span></td>
+  <td></td><td></td><td></td>
+  {{else}}
+  <td class="mono">{{.Value}}</td>
+  <td>{{.TTL}}</td>
+  <td>
+    {{if .Disabled}}<span class="badge badge-muted">disabled</span>
+    {{else if .Matches}}<span class="badge badge-ok">ok</span>
+    {{else}}<span class="badge badge-warn" title="netreg expects {{.Expected}}">differs</span>{{end}}
+  </td>
+  <td>{{with .Modified}}{{if not .IsZero}}{{datetime .}}{{end}}{{end}}</td>
+  <td>{{with .LastUsed}}{{if .IsZero}}<span class="muted">never</span>{{else}}{{datetime .}}{{end}}{{end}}</td>
+  <td>{{.Comments}}</td>
+  {{end}}
+</tr>
+{{else}}
+<tr><td colspan="8" class="empty">{{if .Device.Zone}}No DNS records for this device.{{else}}This device has no zone yet, so it has no DNS records.{{end}}</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>
 </div>
 
 <div class="section-head"><h2>Aliases (CNAME)</h2></div>
